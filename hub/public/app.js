@@ -33,6 +33,16 @@ for (const btn of document.querySelectorAll('[data-all-present]')) {
 	});
 }
 
+// Keep the selected meeting's column in view when the history first opens.
+for (const history of document.querySelectorAll('.attendance-history')) {
+	history.addEventListener('toggle', () => {
+		if (history.open) {
+			const table = history.querySelector('.table-scroll');
+			if (table) table.scrollLeft = table.scrollWidth;
+		}
+	}, { once: true });
+}
+
 // Menus (<details class="menu">): one open at a time; a click elsewhere or Escape closes them.
 const openMenus = () => document.querySelectorAll('details.menu[open]');
 document.addEventListener('click', (e) => {

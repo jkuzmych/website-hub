@@ -3,12 +3,15 @@ import { sessionMember } from './auth';
 import { loadViewer } from './db';
 import { scheduled } from './reminders';
 import { adminRoutes } from './routes/admin';
+import { boardTaskRoutes } from './routes/board-tasks';
 import { authRoutes } from './routes/auth';
 import { formRoutes, publicFormRoutes } from './routes/forms';
 import { homeRoutes } from './routes/home';
 import { meetingRoutes } from './routes/meetings';
+import { meetingContentRoutes } from './routes/meeting-content';
 import { peopleRoutes } from './routes/people';
 import { taskRoutes } from './routes/tasks';
+import { teamPageRoutes } from './routes/team-pages';
 import type { AppEnv, Env } from './types';
 import { page } from './views/layout';
 import { PageHead } from './views/ui';
@@ -53,9 +56,12 @@ app.use('*', async (c, next) => {
 
 app.route('/', homeRoutes);
 app.route('/', taskRoutes);
+app.route('/', boardTaskRoutes);
 app.route('/', meetingRoutes);
+app.route('/', meetingContentRoutes);
 app.route('/', formRoutes);
 app.route('/', peopleRoutes);
+app.route('/', teamPageRoutes);
 app.route('/', adminRoutes);
 
 app.notFound((c) => {

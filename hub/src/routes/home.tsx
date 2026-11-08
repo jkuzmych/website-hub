@@ -1,12 +1,25 @@
 import { Hono } from 'hono';
+import { boardTasks } from '../board';
 import { addDays, formatDate, formatTimeRange, todayIn } from '../dates';
-import { all, first, groupStats, MEETING_SELECT, MEETING_VISIBLE, TASK_SELECT, teamNames, visible } from '../db';
+import { all, first, groupStats, MEETING_SELECT, MEETING_VISIBLE, run, TASK_SELECT, teamNames, visible } from '../db';
+import { readForm, str } from '../form';
 import { canAssign, isExec } from '../perm';
 import type { AppEnv, MeetingRow, TaskRow } from '../types';
 import { page } from '../views/layout';
-import { collapseTasks, Empty, PageHead, TaskList } from '../views/ui';
+import { BoardTaskList } from '../views/board';
+import { collapseTasks, Empty, Field, PageHead, TaskList } from '../views/ui';
 
 export const homeRoutes = new Hono<AppEnv>();
+
+homeRoutes.post('/availability', async (c) => {
+	const raw = (await readForm(c)).hours;
+	if (typeof raw !== 'string' || raw.length > 32) return c.redirect('/?error=hours');
+	const value = str(raw);
+	const hours = value === '' ? null : Number(value);
+	if (hours !== null && (!/^\d+(\.\d+)?$/.test(value) || hours < 0 || hours > 168)) return c.redirect('/?error=hours');
+	await run(c.env.DB, 'UPDATE members SET available_hours = ? WHERE id = ?', hours, c.get('viewer').id);
+	return c.redirect('/?ok=saved');
+});
 
 export function MeetingList({ meetings, today }: { meetings: MeetingRow[]; today: string }) {
 	if (!meetings.length) return <Empty>Nothing yet.</Empty>;
@@ -40,7 +53,7 @@ homeRoutes.get('/', async (c) => {
 	const today = todayIn(c.env.TIMEZONE);
 	const weekOut = addDays(today, 7);
 
-	const [mine, recentDone, assignedByMe, upcoming, recent, clubOverdue] = await Promise.all([
+	const [mine, recentDone, assignedByMe, upcoming, recent, clubOverdue, shared] = await Promise.all([
 		all<TaskRow>(db, `${TASK_SELECT} WHERE t.assignee_id = ? AND t.status = 'open' ORDER BY t.due_date, t.id`, v.id),
 		all<TaskRow>(db, `${TASK_SELECT} WHERE t.assignee_id = ? AND t.status = 'done' ORDER BY t.completed_at DESC LIMIT 5`, v.id),
 		canAssign(v)
@@ -56,7 +69,8 @@ homeRoutes.get('/', async (c) => {
 			today
 		),
 		all<MeetingRow>(db, `${MEETING_SELECT} WHERE ${visible(v, MEETING_VISIBLE)} AND m.date < ?2 ORDER BY m.date DESC, m.time DESC LIMIT 5`, v.id, today),
-		isExec(v) ? first<{ n: number; people: number }>(db, "SELECT COUNT(*) AS n, COUNT(DISTINCT assignee_id) AS people FROM tasks WHERE status = 'open' AND due_date < ?", today) : Promise.resolve(null)
+		isExec(v) ? first<{ n: number; people: number }>(db, "SELECT COUNT(*) AS n, COUNT(DISTINCT assignee_id) AS people FROM tasks WHERE status = 'open' AND due_date < ?", today) : Promise.resolve(null),
+		boardTasks(db, v.id, { assignee: v.id, status: 'open' })
 	]);
 
 	const groups = await groupStats(db, assignedByMe);
@@ -64,6 +78,8 @@ homeRoutes.get('/', async (c) => {
 	const overdue = mine.filter((t) => t.due_date < today);
 	const thisWeek = mine.filter((t) => t.due_date >= today && t.due_date <= weekOut);
 	const later = mine.filter((t) => t.due_date > weekOut);
+	const openCount = mine.length + shared.length;
+	const overdueCount = overdue.length + shared.filter((t) => t.due_date < today).length;
 	const firstName = v.name.split(' ')[0];
 
 	return page(
@@ -73,7 +89,7 @@ homeRoutes.get('/', async (c) => {
 			<PageHead
 				eyebrow={formatDate(today)}
 				title={`Hi, ${firstName}`}
-				sub={mine.length ? `You have ${mine.length} open task${mine.length === 1 ? '' : 's'}${overdue.length ? `, ${overdue.length} overdue` : ''}.` : "You're all caught up."}
+				sub={openCount ? `You have ${openCount} open task${openCount === 1 ? '' : 's'}${overdueCount ? `, ${overdueCount} overdue` : ''}.` : "You're all caught up."}
 				actions={
 					<a class="btn primary" href="/tasks/new">
 						New task
@@ -88,6 +104,10 @@ homeRoutes.get('/', async (c) => {
 
 			<div class="grid-2">
 				<section>
+					{shared.length > 0 && <>
+						<h2 class="section-title">Team board tasks</h2>
+						<BoardTaskList tasks={shared} viewer={v} today={today} back="/" />
+					</>}
 					{overdue.length > 0 && (
 						<>
 							<h2 class="section-title bad">
@@ -124,6 +144,12 @@ homeRoutes.get('/', async (c) => {
 					)}
 				</section>
 				<aside>
+					<form class="card stack" method="post" action="/availability">
+						<Field label="Available hours per week">
+							<input type="number" name="hours" min="0" max="168" step="any" value={v.available_hours ?? ''} />
+						</Field>
+						<div><button class="btn small">Save</button></div>
+					</form>
 					<h2 class="section-title">Coming up</h2>
 					<MeetingList meetings={upcoming} today={today} />
 					<h2 class="section-title">Recent meetings</h2>

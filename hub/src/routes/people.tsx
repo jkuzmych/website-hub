@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
+import { boardTasks } from '../board';
 import { formatDate, todayIn } from '../dates';
 import { activeMembers, all, memberByEmail, memberById, MEETING_VISIBLE, run, TASK_SELECT, TASK_VISIBLE, teams, visible } from '../db';
 import { id, isEmail, readForm, str } from '../form';
 import { isExec } from '../perm';
 import type { AppEnv, AttendanceStatus, Member, MeetingRow, Role, Team, TaskRow } from '../types';
 import { page } from '../views/layout';
+import { BoardTaskList } from '../views/board';
 import { Choice, Empty, Field, Menu, PageHead, pct, PostButton, Stat, TaskList } from '../views/ui';
 
 export const peopleRoutes = new Hono<AppEnv>();
@@ -168,7 +170,7 @@ peopleRoutes.get('/people/:id', async (c) => {
 	if (!person) return c.notFound();
 	const today = todayIn(c.env.TIMEZONE);
 	const self = person.id === v.id;
-	const [tasks, meetings, memberships] = await Promise.all([
+	const [tasks, meetings, memberships, shared] = await Promise.all([
 		all<TaskRow>(
 			c.env.DB,
 			`${TASK_SELECT} WHERE t.assignee_id = ?2 AND ${visible(v, TASK_VISIBLE)} ORDER BY t.status = 'open' DESC, CASE WHEN t.status = 'open' THEN t.due_date END, t.completed_at DESC LIMIT 60`,
@@ -183,7 +185,8 @@ peopleRoutes.get('/people/:id', async (c) => {
 			v.id,
 			person.id
 		),
-		all<Team & { is_lead: number }>(c.env.DB, 'SELECT t.*, x.is_lead FROM team_members x JOIN teams t ON t.id = x.team_id WHERE x.member_id = ? AND t.archived = 0 ORDER BY t.name', person.id)
+		all<Team & { is_lead: number }>(c.env.DB, 'SELECT t.*, x.is_lead FROM team_members x JOIN teams t ON t.id = x.team_id WHERE x.member_id = ? AND t.archived = 0 ORDER BY t.name', person.id),
+		boardTasks(c.env.DB, v.id, { assignee: person.id })
 	]);
 	const open = tasks.filter((t) => t.status === 'open');
 	const closed = tasks.filter((t) => t.status !== 'open');
@@ -228,6 +231,10 @@ peopleRoutes.get('/people/:id', async (c) => {
 							<TaskList tasks={closed} today={today} viewer={v} show={['team']} back={`/people/${person.id}`} />
 						</>
 					)}
+					{shared.length > 0 && <>
+						<h2 class="section-title">Team board tasks</h2>
+						<BoardTaskList tasks={shared} viewer={v} today={today} back={`/people/${person.id}`} />
+					</>}
 				</section>
 				<aside>
 					<h2 class="section-title">Meetings</h2>
@@ -311,11 +318,11 @@ type TeamMemberRow = { team_id: number; member_id: number; is_lead: number; name
 
 peopleRoutes.get('/teams', async (c) => {
 	const v = c.get('viewer');
-	if (!isExec(v)) return forbidden(c);
+	const editable = isExec(v);
 	const [teamList, links, people] = await Promise.all([
 		teams(c.env.DB, true),
 		all<TeamMemberRow>(c.env.DB, 'SELECT x.team_id, x.member_id, x.is_lead, m.name, m.role FROM team_members x JOIN members m ON m.id = x.member_id WHERE m.active = 1 ORDER BY x.is_lead DESC, m.name COLLATE NOCASE'),
-		activeMembers(c.env.DB)
+		editable ? activeMembers(c.env.DB) : Promise.resolve([])
 	]);
 	const card = (t: Team) => {
 		const members = links.filter((l) => l.team_id === t.id);
@@ -324,20 +331,20 @@ peopleRoutes.get('/teams', async (c) => {
 			<section class={`card team${t.archived ? ' inactive' : ''}`} id={`team-${t.id}`}>
 				<header class="team-head">
 					<div>
-						<h2>{t.name}</h2>
+						<h2><a href={`/teams/${t.id}`}>{t.name}</a></h2>
 						<p>
 							{members.length} {members.length === 1 ? 'person' : 'people'}
-							{t.kind === 'exec' && ' · Execs only'}
+							{t.kind === 'exec' && ' · Exec team'}
 						</p>
 					</div>
-					<Menu label={`${t.name} settings`} form>
+					{editable && <Menu label={`${t.name} settings`} form>
 						<form method="post" action={`/teams/${t.id}`} class="stack">
 							<Field label="Name">
 								<input name="name" value={t.name} required maxlength={100} />
 							</Field>
 							<Choice
 								name="kind"
-								label="Who sees its meetings and tasks"
+								label="Meeting visibility"
 								selected={t.kind}
 								options={[
 									['project', 'Its members'],
@@ -351,21 +358,21 @@ peopleRoutes.get('/teams', async (c) => {
 								<button class="btn primary small">Save</button>
 							</div>
 						</form>
-					</Menu>
+					</Menu>}
 				</header>
-				<ul class="team-members">
+				<details><summary class="link-btn">Members</summary><ul class="team-members">
 					{members.map((m) => (
 						<li>
 							<a href={`/people/${m.member_id}`}>{m.name}</a>
 							{/* The exec board has execs, not leads. */}
 							{t.kind === 'exec' ? m.role === 'exec' && <span class="tag exec">Exec</span> : m.is_lead ? <span class="tag lead">Lead</span> : null}
-							<Menu label={`Options for ${m.name}`}>
+							{editable && <Menu label={`Options for ${m.name}`}>
 								{t.kind !== 'exec' && <PostButton action={`/teams/${t.id}/members/${m.member_id}/lead`} label={m.is_lead ? 'Remove as lead' : 'Make lead'} cls="item" />}
 								<PostButton action={`/teams/${t.id}/members/${m.member_id}/remove`} label={`Remove from ${t.name}`} cls="item danger" />
-							</Menu>
+							</Menu>}
 						</li>
 					))}
-				</ul>
+				</ul></details>
 				{others.length > 0 && (
 					<form method="post" action={`/teams/${t.id}/members`} class="team-add" data-autosubmit>
 						<select name="member" required aria-label={`Add someone to ${t.name}`}>
@@ -387,10 +394,10 @@ peopleRoutes.get('/teams', async (c) => {
 		<>
 			<PageHead title="Teams" sub="Leads can record their team’s meetings and assign its tasks." />
 			<div class="teams">{teamList.filter((t) => !t.archived).map(card)}</div>
-			<form method="post" action="/teams" class="new-team">
+			{editable && <form method="post" action="/teams" class="new-team">
 				<input name="name" required maxlength={100} placeholder="New team name" aria-label="New team name" />
 				<button class="btn">Create team</button>
-			</form>
+			</form>}
 			{archived.length > 0 && (
 				<details class="archived-teams">
 					<summary>Archived teams ({archived.length})</summary>

@@ -134,7 +134,7 @@ function Ring({ done, total }: { done: number; total: number }) {
 /** The round control at the start of a task row: a button for whoever may finish it, a marker for everyone else. */
 function Tick({ task, viewer, back }: { task: TaskRow; viewer: Viewer; back: string }) {
 	if (task.status !== 'open') return <span class="tick on" title={task.status === 'done' ? 'Done' : 'Dropped'}></span>;
-	if (!canCompleteTask(viewer, task)) return <span class="tick" title="Only the assignee or whoever assigned it can mark it done"></span>;
+	if (!canCompleteTask(viewer, task)) return <span class="tick" title="Only the assignee or an exec can mark it done"></span>;
 	return (
 		<form method="post" action={`/tasks/${task.id}/status`} class="inline">
 			<input type="hidden" name="back" value={back} />

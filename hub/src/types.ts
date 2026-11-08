@@ -24,6 +24,7 @@ export type Member = {
 	title: string;
 	discord: string;
 	active: number;
+	available_hours?: number | null;
 };
 
 export type Team = {
@@ -32,6 +33,9 @@ export type Team = {
 	kind: 'exec' | 'project';
 	description: string;
 	archived: number;
+	discord_url?: string;
+	drive_url?: string;
+	github_url?: string;
 };
 
 export type TaskStatus = 'open' | 'done' | 'dropped';
@@ -48,6 +52,7 @@ export type Task = {
 	group_id: number | null;
 	due_date: string;
 	status: TaskStatus;
+	board_in_progress?: number;
 	completed_at: string | null;
 	last_reminder_on: string | null;
 	reminders_sent: number;

@@ -7,7 +7,11 @@ Task and meeting tracker for the club, live at https://hub.agenticaiuw.com.
 - **Forms**: a meeting can have one (feedback, say) that people open from a QR code without signing in. Show on screen puts the QR code and a live count on the projector; roster members who fill it out are checked off as there.
 - **People** shows execs who has open and overdue work and each person's attendance.
 
-Sign-in is by a 6-digit code sent to your email (no passwords). Only people on the roster can sign in. Exec meetings and exec tasks are visible to execs only; project team members see their team's meetings and tasks.
+Sign-in uses a six-digit email code. Signed-in roster members can see all teams and tasks. Meetings retain their existing access rules.
+
+- Open **Teams** to see team and subteam boards, links, rosters and members' available hours. Set your hours on **My work**.
+- Team board cards have a shared status and can be assigned to people, subteams, or both. Team members can claim an unassigned card. The original Tasks form still supports independent assignments. The morning reminder combines both types of work.
+- Meetings support structured agenda items, speaker notes and private attachments up to 8 MiB. Members can check in as Here or Partial during eligible meetings. Meeting editors and existing QR forms retain their attendance controls.
 
 ## Reminders
 
@@ -39,7 +43,7 @@ npm run typecheck
 npm run deploy
 ```
 
-Schema changes go in a new file in `migrations/`, applied with `npm run db:migrate`.
+Schema changes go in a new file in `migrations/`. Apply migrations 0011 through 0013 before serving the team board and meeting additions. `npm test` starts a loopback Worker with a disposable D1 database under `.wrangler/` and logs synthetic email locally.
 
 `import/fall-2026-exec-history.sql` loads the fall 2026 exec meetings and attendance from the club Drive. Run it once the execs are on the roster:
 

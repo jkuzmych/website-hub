@@ -1,15 +1,18 @@
 import { Hono } from 'hono';
 import { addDays, formatDate, formatTime, formatTimeRange, hourIn, isDate, isTime, todayIn } from '../dates';
-import { activeMembers, all, first, MEETING_EXPECTED, MEETING_TEAMS_JSON, MEETING_VISIBLE, meetingById, meetingTeams, nowIso, TASK_SELECT, teamNames, teams, teamsByMember, visible } from '../db';
+import { activeMembers, all, first, MEETING_EXPECTED, MEETING_SELECT, MEETING_TEAMS_JSON, MEETING_VISIBLE, meetingById, meetingTeams, nowIso, run, TASK_SELECT, teamNames, teams, teamsByMember, visible } from '../db';
 import { meetingEmail } from '../emails';
 import { id, isHttpUrl, list, readForm, str } from '../form';
-import { canAssign, canEditMeeting, canSeeMeeting, isExec, teamsFor } from '../perm';
+import { meetingTiming } from '../meeting-content';
+import { canAssign, canEditMeeting, isExec, teamsFor } from '../perm';
 import { announceMeeting, emailMeeting, meetingPeople, notifyAssigned } from '../reminders';
 import { meetingReminderAt } from '../schedule';
 import type { AppEnv, AttendanceStatus, Member, MeetingKind, MeetingRow, TaskRow, Viewer } from '../types';
 import { page } from '../views/layout';
 import { Choice, Empty, Field, Markdown, MemberSelect, PageHead, PeoplePicker, Tabs, TaskList } from '../views/ui';
 import { FormSection, formForMeeting } from './forms';
+import { loadMeeting } from './meeting-access';
+import { MeetingAgenda, MeetingFiles, meetingContent } from './meeting-content';
 import { createTasks } from './tasks';
 
 export const meetingRoutes = new Hono<AppEnv>();
@@ -440,19 +443,6 @@ function TimeSelect({ name, value, label }: { name: string; value: string; label
 	);
 }
 
-async function loadMeeting(c: { env: AppEnv['Bindings'] }, v: Viewer, raw: string) {
-	const meetingId = id(raw);
-	const m = meetingId ? await meetingById(c.env.DB, meetingId) : null;
-	if (!m) return null;
-	const listed = !!(await first(
-		c.env.DB,
-		'SELECT 1 FROM attendance WHERE meeting_id = ?1 AND member_id = ?2 UNION ALL SELECT 1 FROM meeting_invites WHERE meeting_id = ?1 AND member_id = ?2',
-		m.id,
-		v.id
-	));
-	return canSeeMeeting(v, m, listed) ? m : null;
-}
-
 /** Later meetings in the same series that changes to this one can carry over to. */
 const LATER_IN_SERIES = 'FROM meetings WHERE series_id = ?1 AND date > ?2 AND team_id = ?3';
 
@@ -539,15 +529,68 @@ meetingRoutes.post('/meetings/:id/delete', async (c) => {
  * Who's expected: everyone on its teams (all execs for exec meetings), anyone invited, and anyone
  * already marked. Club events are open to everyone, so only the people marked as there.
  */
+type AttendanceRow = { member_id: number; meeting_id: number; status: AttendanceStatus; self_report: number };
+
 async function rosterFor(db: D1Database, m: MeetingRow) {
-	return all<Member & { status: AttendanceStatus | null }>(
+	return all<Member & { status: AttendanceStatus | null; self_report: number | null }>(
 		db,
-		`SELECT mb.*, a.status FROM members mb
+		`SELECT mb.*, a.status, a.self_report FROM members mb
 		 LEFT JOIN attendance a ON a.member_id = mb.id AND a.meeting_id = ?1
 		 WHERE a.status IS NOT NULL OR (?2 = 'meeting' AND mb.active = 1 AND ${MEETING_EXPECTED})
 		 ORDER BY mb.name COLLATE NOCASE`,
 		m.id,
 		m.kind
+	);
+}
+
+async function attendanceHistory(db: D1Database, m: MeetingRow, v: Viewer) {
+	const history = await all<MeetingRow>(db, `${MEETING_SELECT}
+	 WHERE ${visible(v, MEETING_VISIBLE)} AND m.kind = ?2 AND (m.date, m.time, m.id) <= (?3, ?4, ?5)
+	 AND (?2 = 'event' OR EXISTS (SELECT 1 FROM meeting_teams mt
+	   WHERE mt.meeting_id = m.id AND mt.team_id IN (SELECT team_id FROM meeting_teams WHERE meeting_id = ?5)))
+	 ORDER BY m.date DESC, m.time DESC, m.id DESC`, v.id, m.kind, m.date, m.time, m.id);
+	if (!history.some((meeting) => meeting.id === m.id)) history.unshift(m);
+	const ids = JSON.stringify(history.map((meeting) => meeting.id));
+	const [rows, expected] = await Promise.all([
+		all<AttendanceRow>(db, 'SELECT * FROM attendance WHERE meeting_id IN (SELECT value FROM json_each(?))', ids),
+		m.kind === 'event' ? [] : all<{ meeting_id: number; member_id: number }>(db, `SELECT record.id AS meeting_id, mb.id AS member_id
+		 FROM meetings record CROSS JOIN members mb WHERE record.id IN (SELECT value FROM json_each(?1))
+		 AND mb.active = 1 AND ${MEETING_EXPECTED.replaceAll('?1', 'record.id')}`, ids)
+	]);
+	return { history: history.reverse(), rows, expected };
+}
+
+function attendanceLabel(status: AttendanceStatus, selfReport: number | null) {
+	return status === 'present' ? 'Here' : status === 'late' && selfReport ? 'Partial' : STATUSES.find(([value]) => value === status)?.[1] ?? '';
+}
+
+function AttendanceHistory({ roster, history, rows, expected, zone }: {
+	roster: Member[]; history: MeetingRow[]; rows: AttendanceRow[]; expected: { meeting_id: number; member_id: number }[]; zone: string;
+}) {
+	const byCell = new Map(rows.map((row) => [`${row.member_id}:${row.meeting_id}`, row]));
+	const expectedCells = new Set(expected.map((row) => `${row.member_id}:${row.meeting_id}`));
+	const people = new Map(roster.map((member) => [member.id, member.name]));
+	if (!people.size) return null;
+	const started = history.map((meeting) => meetingTiming(meeting, zone).started);
+	return (
+		<details class="card attendance-history">
+			<summary class="link-btn">Attendance history</summary>
+			<div class="table-scroll" tabindex={0} role="region" aria-label="Attendance history">
+				<table class="attendance-sheet">
+					<thead><tr><th scope="col">Member</th>{history.map((meeting) => (
+						<th scope="col"><a href={`/meetings/${meeting.id}`} title={meeting.title}>{formatDate(meeting.date)}</a></th>
+					))}</tr></thead>
+					<tbody>{Array.from(people, ([memberId, name]) => (
+						<tr><th scope="row">{name}</th>{history.map((meeting, i) => {
+							const key = `${memberId}:${meeting.id}`;
+							const entry = byCell.get(key);
+							const absent = started[i] && (meeting.kind === 'event' || expectedCells.has(key));
+							return <td>{entry ? <span class={`pill att-${entry.status}`}>{attendanceLabel(entry.status, entry.self_report)}</span> : absent ? 'Absent' : '—'}</td>;
+						})}</tr>
+					))}</tbody>
+				</table>
+			</div>
+		</details>
 	);
 }
 
@@ -602,12 +645,14 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 	const today = todayIn(c.env.TIMEZONE);
 	const editable = canEditMeeting(v, m);
 	const remindAt = meetingReminderAt(m);
-	const [roster, actions, people, toRemind, form] = await Promise.all([
+	const [roster, actions, people, toRemind, form, content, attendance] = await Promise.all([
 		rosterFor(c.env.DB, m),
 		all<TaskRow>(c.env.DB, `${TASK_SELECT} WHERE t.meeting_id = ? ORDER BY t.status = 'open' DESC, t.due_date, a.name`, m.id),
 		editable ? activeMembers(c.env.DB) : Promise.resolve([] as Member[]),
 		editable && m.date >= today ? meetingPeople(c.env.DB, m) : Promise.resolve([] as Member[]),
-		formForMeeting(c.env.DB, m.id)
+		formForMeeting(c.env.DB, m.id),
+		meetingContent(c.env.DB, m.id),
+		attendanceHistory(c.env.DB, m, v)
 	]);
 	const reminded = m.reminded_on === remindAt.date;
 	const remindLater = remindAt.date > today || (remindAt.date === today && hourIn(c.env.TIMEZONE) < remindAt.hour);
@@ -616,6 +661,10 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 	const others = people.filter((p) => !roster.some((r) => r.id === p.id));
 	const defaultDue = addDays(m.date > today ? m.date : today, 7);
 	const joint = m.kind === 'meeting' && meetingTeams(m).length > 1;
+	const timing = meetingTiming(m, c.env.TIMEZONE);
+	const myAttendance = roster.find((r) => r.id === v.id);
+	const canCheckIn = timing.started && !timing.ended && (m.kind === 'event' || !!myAttendance)
+		&& (!myAttendance?.status || myAttendance.self_report === 1);
 
 	return page(
 		c,
@@ -650,10 +699,12 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 
 			<div class="grid-2 wide-left">
 				<section>
-					<h2 class="section-title">Agenda</h2>
-					<Markdown text={m.agenda} empty="No agenda recorded." />
+					<h2 class="section-title" id="agenda">Agenda</h2>
+					<Markdown text={m.agenda} empty={content.agenda.some((item) => !item.removed) ? undefined : 'No agenda recorded.'} />
+					<MeetingAgenda m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
 					<h2 class="section-title">Notes</h2>
 					<Markdown text={m.notes} empty="No notes yet." />
+					<MeetingFiles m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
 
 					<h2 class="section-title" id="actions">
 						Action items
@@ -693,6 +744,13 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 						</p>
 					)}
 					<FormSection m={m} f={form} editable={editable} appUrl={c.env.APP_URL} />
+					{canCheckIn && (
+						<form method="post" action={`/meetings/${m.id}/check-in`} class="card stack">
+							<strong>Your attendance</strong>
+							<Choice name="status" label="Check in" selected={myAttendance?.status ?? 'present'} options={[[ 'present', 'Here' ], [ 'late', 'Partial' ]]} />
+							<div><button class="btn small primary">Save check-in</button></div>
+						</form>
+					)}
 					{m.kind === 'event' ? (
 						<WhoCame m={m} came={marked} people={editable ? people : null} />
 					) : (
@@ -739,7 +797,7 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 									{marked.map((r) => (
 										<li>
 											<span>{r.name}</span>
-											<span class={`pill att-${r.status}`}>{r.status}</span>
+											<span class={`pill att-${r.status}`}>{attendanceLabel(r.status!, r.self_report)}</span>
 										</li>
 									))}
 								</ul>
@@ -748,10 +806,28 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 							)}
 						</>
 					)}
+					<AttendanceHistory roster={roster} {...attendance} zone={c.env.TIMEZONE} />
 				</aside>
 			</div>
 		</>
 	);
+});
+
+meetingRoutes.post('/meetings/:id/check-in', async (c) => {
+	const v = c.get('viewer');
+	const m = await loadMeeting(c, v, c.req.param('id'));
+	if (!m) return c.notFound();
+	const form = await readForm(c);
+	const status = str(form.status);
+	const timing = meetingTiming(m, c.env.TIMEZONE);
+	const path = `/meetings/${m.id}`;
+	if (!timing.started || timing.ended || (status !== 'present' && status !== 'late')) return c.redirect(`${path}?error=forbidden`);
+	const result = await run(c.env.DB, `INSERT INTO attendance (meeting_id, member_id, status, self_report)
+	 SELECT ?1, mb.id, ?4, 1 FROM members mb WHERE mb.id = ?3 AND mb.active = 1
+	 AND (?2 = 'event' OR ${MEETING_EXPECTED})
+	 ON CONFLICT(meeting_id, member_id) DO UPDATE SET status = excluded.status
+	 WHERE attendance.self_report = 1`, m.id, m.kind, v.id, status);
+	return c.redirect(`${path}?${result.meta.changes ? 'ok=attendance' : 'error=forbidden'}`);
 });
 
 meetingRoutes.post('/meetings/:id/attendance', async (c) => {
@@ -772,7 +848,7 @@ meetingRoutes.post('/meetings/:id/attendance', async (c) => {
 	const valid = new Set(STATUSES.map(([s]) => s));
 	const stmts: D1PreparedStatement[] = [];
 	const upsert = (memberId: number, status: string) =>
-		c.env.DB.prepare('INSERT INTO attendance (meeting_id, member_id, status) VALUES (?, ?, ?) ON CONFLICT(meeting_id, member_id) DO UPDATE SET status = excluded.status').bind(m.id, memberId, status);
+		c.env.DB.prepare('INSERT INTO attendance (meeting_id, member_id, status) VALUES (?, ?, ?) ON CONFLICT(meeting_id, member_id) DO UPDATE SET status = excluded.status, self_report = 0').bind(m.id, memberId, status);
 	for (const [key, value] of Object.entries(form)) {
 		const memberId = key.startsWith('att_') ? id(key.slice(4)) : null;
 		const status = str(value);

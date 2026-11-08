@@ -411,6 +411,25 @@ tr.inactive, .team.inactive { opacity: 0.55; }
 	.team-members li:hover .menu, .team-members li:focus-within .menu { opacity: 1; }
 }
 .team-members .icon-btn { width: 26px; height: 26px; }
+
+/* Team boards and meeting records */
+.inline-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.inline-tools input, .inline-tools select { width: auto; max-width: 100%; min-width: 0; }
+.kanban { display: grid; grid-template-columns: repeat(4, minmax(15rem, 1fr)); gap: 12px; overflow-x: auto; padding: 2px 2px 12px; }
+.kanban-column { min-width: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.kanban-column > .section-title { margin: 0 0 8px; }
+.board-list { display: grid; gap: 8px; list-style: none; margin: 0 0 12px; padding: 0; }
+.board-card { display: grid; gap: 5px; min-width: 0; padding: 10px; overflow-wrap: anywhere; }
+.board-card .inline-tools select { flex: 1; }
+.selection-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 6px 12px; }
+.agenda-items { padding-left: 2.25rem; }
+.agenda-items details, .attendance-history .table-scroll { margin-top: 8px; }
+.agenda-items details > summary, .attendance-history > summary { margin-bottom: 4px; }
+#files audio { max-width: 100%; }
+.table-scroll { overflow-x: auto; }
+.attendance-sheet { border-collapse: separate; border-spacing: 0; white-space: nowrap; font-size: .84rem; }
+.attendance-sheet th, .attendance-sheet td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.attendance-sheet th:first-child { position: sticky; left: 0; background: var(--surface); }
 .team-add { padding: 8px 12px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; }
 .team-add select { color: var(--muted); }
 .new-team { display: flex; gap: 8px; max-width: 420px; }

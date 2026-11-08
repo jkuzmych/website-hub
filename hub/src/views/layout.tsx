@@ -16,6 +16,7 @@ const FLASH: Record<string, string> = {
 	dropped: 'Dropped. No more reminders for it.',
 	commented: 'Comment added.',
 	assigned: 'Assigned. Everyone on it was emailed.',
+	'assigned-self': 'Assigned to you.',
 	attendance: 'Attendance saved.',
 	deleted: 'Deleted.',
 	imported: 'Roster updated.',
@@ -27,6 +28,12 @@ const FLASH: Record<string, string> = {
 
 const ERRORS: Record<string, string> = {
 	missing: 'Fill in the required fields.',
+	hours: 'Enter a number from 0 to 168.',
+	stale: 'This item changed. Review the latest version and try again.',
+	file: 'Choose a supported file up to 8 MiB.',
+	'file-space': 'The attachment storage limit has been reached.',
+	link: 'Use valid HTTPS links.',
+	selection: 'Choose active people and subteams on this team.',
 	team: 'Pick at least one team, or Whole club.',
 	date: 'Use a valid date.',
 	until: 'Pick an end date for the repeats that comes after the first date.',
@@ -45,9 +52,10 @@ function Nav({ viewer, active }: { viewer: Viewer; active?: NavKey }) {
 		['home', '/', 'My work'],
 		['tasks', '/tasks', 'Tasks'],
 		['meetings', '/meetings', 'Meetings'],
-		['people', '/people', 'People']
+		['people', '/people', 'People'],
+		['teams', '/teams', 'Teams']
 	];
-	if (isExec(viewer)) links.push(['teams', '/teams', 'Teams'], ['email', '/email', 'Email']);
+	if (isExec(viewer)) links.push(['email', '/email', 'Email']);
 	return (
 		<nav class="nav" aria-label="Main">
 			{links.map(([key, href, label]) => (
