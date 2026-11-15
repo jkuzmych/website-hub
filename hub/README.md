@@ -34,6 +34,18 @@ Every email has a one-click "Mark done" link. Exec → Email shows the log and c
 
 ## Development
 
+### Local demo with fictional users
+
+The local Worker uses a persistent SQLite database in `.wrangler/state/`, separate from production D1. To populate it with fictional users, team/subteam rosters, board cards, individual tasks, meetings and attendance:
+
+```sh
+npm run db:migrate:local
+npm run db:seed:local
+npm run dev:local
+```
+
+Open http://localhost:8788. Use `exec@example.test` (executive), `lead@example.test` (team lead), or `member@example.test` (ordinary member). The sign-in code appears on the next page in local mode, and all emails are logged locally. Use separate browser profiles or a private window to compare roles side by side; windows in the same profile share a login. Demo teams are prefixed `Demo -`. Seeding is additive and can be repeated without overwriting existing data or demo edits. Relative dates are set on the first seed. The seed command always targets `--local`; never load these fictional fixtures into production.
+
 ```
 npm install
 npm run db:migrate:local

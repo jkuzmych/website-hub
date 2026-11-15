@@ -29,6 +29,8 @@ const FLASH: Record<string, string> = {
 };
 
 const ERRORS: Record<string, string> = {
+	summary: 'Enter a summary contribution of 1 to 10000 characters.',
+	duration: 'Enter a duration from 1 to 1440 whole minutes.',
 	missing: 'Fill in the required fields.',
 	hours: 'Enter a number from 0 to 168.',
 	stale: 'This item changed. Review the latest version and try again.',

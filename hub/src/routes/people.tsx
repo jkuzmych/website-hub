@@ -7,7 +7,7 @@ import { isExec } from '../perm';
 import type { AppEnv, AttendanceStatus, Member, MeetingRow, Role, Team, TaskRow } from '../types';
 import { page } from '../views/layout';
 import { BoardTaskList } from '../views/board';
-import { Choice, Empty, Field, Menu, PageHead, pct, PostButton, Stat, TaskList } from '../views/ui';
+import { Choice, Empty, Field, MembersDialog, Menu, PageHead, pct, PostButton, Stat, TaskList } from '../views/ui';
 
 export const peopleRoutes = new Hono<AppEnv>();
 
@@ -326,6 +326,7 @@ peopleRoutes.get('/teams', async (c) => {
 	]);
 	const card = (t: Team) => {
 		const members = links.filter((l) => l.team_id === t.id);
+		const execs = members.filter((m) => m.role === 'exec');
 		const others = people.filter((p) => !members.some((m) => m.member_id === p.id));
 		return (
 			<section class={`card team${t.archived ? ' inactive' : ''}`} id={`team-${t.id}`}>
@@ -333,10 +334,28 @@ peopleRoutes.get('/teams', async (c) => {
 					<div>
 						<h2><a href={`/teams/${t.id}`}>{t.name}</a></h2>
 						<p>
-							{members.length} {members.length === 1 ? 'person' : 'people'}
-							{t.kind === 'exec' && ' · Exec team'}
+							{execs.length ? <>{execs.length === 1 ? 'Exec' : 'Execs'}{' · '}
+								{execs.map((exec, index) => <>{index > 0 && ', '}<a href={`/people/${exec.member_id}`}>{exec.name}</a></>)}
+							</> : 'No exec assigned'}
 						</p>
 					</div>
+
+				</header>
+				<div class="team-actions">
+				<MembersDialog id={`team-${t.id}-members`} name={t.name} count={members.length}>
+					{members.length ? <ul class="team-members">
+						{members.map((m) => (
+							<li>
+								<a href={`/people/${m.member_id}`}>{m.name}</a>
+								{m.role === 'exec' && <span class="tag exec">Exec</span>}
+								{t.kind !== 'exec' && !!m.is_lead && <span class="tag lead">Lead</span>}
+								{editable && <Menu label={`Options for ${m.name}`}>
+									{t.kind !== 'exec' && <PostButton action={`/teams/${t.id}/members/${m.member_id}/lead`} label={m.is_lead ? 'Remove as lead' : 'Make lead'} cls="item" />}
+									<PostButton action={`/teams/${t.id}/members/${m.member_id}/remove`} label={`Remove from ${t.name}`} cls="item danger" />
+								</Menu>}
+							</li>
+						))}
+					</ul> : <Empty>No members yet.</Empty>}
 					{editable && <Menu label={`${t.name} settings`} form>
 						<form method="post" action={`/teams/${t.id}`} class="stack">
 							<Field label="Name">
@@ -359,45 +378,59 @@ peopleRoutes.get('/teams', async (c) => {
 							</div>
 						</form>
 					</Menu>}
-				</header>
-				<details><summary class="link-btn">Members</summary><ul class="team-members">
-					{members.map((m) => (
-						<li>
-							<a href={`/people/${m.member_id}`}>{m.name}</a>
-							{/* The exec board has execs, not leads. */}
-							{t.kind === 'exec' ? m.role === 'exec' && <span class="tag exec">Exec</span> : m.is_lead ? <span class="tag lead">Lead</span> : null}
-							{editable && <Menu label={`Options for ${m.name}`}>
-								{t.kind !== 'exec' && <PostButton action={`/teams/${t.id}/members/${m.member_id}/lead`} label={m.is_lead ? 'Remove as lead' : 'Make lead'} cls="item" />}
-								<PostButton action={`/teams/${t.id}/members/${m.member_id}/remove`} label={`Remove from ${t.name}`} cls="item danger" />
-							</Menu>}
-						</li>
-					))}
-				</ul></details>
-				{others.length > 0 && (
-					<form method="post" action={`/teams/${t.id}/members`} class="team-add" data-autosubmit>
+				</MembersDialog>
+				{editable && <button type="button" class="icon-btn team-add-button"
+					aria-label={`Add someone to ${t.name}`} title={`Add someone to ${t.name}`}
+					aria-haspopup="dialog" aria-controls={`team-${t.id}-add`} data-members-dialog={`team-${t.id}-add`}>
+					<span aria-hidden="true">+</span>
+				</button>}
+				</div>
+				{editable && <dialog id={`team-${t.id}-add`} class="members-dialog" aria-labelledby={`team-${t.id}-add-title`}>
+					<div class="members-dialog-content stack">
+						<header><h2 id={`team-${t.id}-add-title`}>Add someone to {t.name}</h2>
+							<form method="dialog"><button class="btn small">Close</button></form>
+						</header>
+				{others.length > 0 ? (
+					<form method="post" action={`/teams/${t.id}/members`} class="team-add">
 						<select name="member" required aria-label={`Add someone to ${t.name}`}>
 							<option value="">Add someone…</option>
 							{others.map((p) => (
 								<option value={String(p.id)}>{p.name}</option>
 							))}
 						</select>
-						<button class="btn small js-hide">Add</button>
+						<button class="btn small primary">Add</button>
 					</form>
-				)}
+				) : <Empty>Everyone on the roster is already on this team.</Empty>}
+					</div>
+				</dialog>}
 			</section>
 		);
 	};
-	const archived = teamList.filter((t) => t.archived);
+	// Keep the leadership team available to existing meeting and task references.
+	const listedTeams = teamList.filter((team) => team.kind !== 'exec' || team.name.toLowerCase() !== 'exec board');
+	const archived = listedTeams.filter((t) => t.archived);
 	return page(
 		c,
 		{ title: 'Teams', active: 'teams' },
 		<>
-			<PageHead title="Teams" sub="Leads can record their team’s meetings and assign its tasks." />
-			<div class="teams">{teamList.filter((t) => !t.archived).map(card)}</div>
-			{editable && <form method="post" action="/teams" class="new-team">
-				<input name="name" required maxlength={100} placeholder="New team name" aria-label="New team name" />
-				<button class="btn">Create team</button>
-			</form>}
+			<PageHead title={<span class="teams-title">Teams{editable && (
+				<button type="button" class="btn small" aria-haspopup="dialog" aria-controls="add-team-dialog" data-members-dialog="add-team-dialog">
+					<span aria-hidden="true">+</span> Add team
+				</button>
+			)}</span>} />
+			{editable && <dialog id="add-team-dialog" class="members-dialog" aria-labelledby="add-team-title">
+				<div class="members-dialog-content stack">
+					<header>
+						<h2 id="add-team-title">Add team</h2>
+						<form method="dialog"><button class="btn small">Close</button></form>
+					</header>
+					<form method="post" action="/teams" class="stack">
+						<Field label="Team name"><input name="name" required maxlength={100} placeholder="New team name" /></Field>
+						<div><button class="btn primary">Add team</button></div>
+					</form>
+				</div>
+			</dialog>}
+			<div class="teams">{listedTeams.filter((t) => !t.archived).map(card)}</div>
 			{archived.length > 0 && (
 				<details class="archived-teams">
 					<summary>Archived teams ({archived.length})</summary>

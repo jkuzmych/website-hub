@@ -30,10 +30,18 @@ export function meetingFileType(name: string, bytes: ArrayBuffer): string | null
 		}
 	}
 	if (ext === 'pdf' && signature.startsWith('%PDF-')) return 'application/pdf';
-	if (ext === 'docx' && signature.startsWith('PK\x03\x04')) {
+	if (ext && ['docx', 'pptx', 'xlsx'].includes(ext) && signature.startsWith('PK\x03\x04')) {
 		const directory = new TextDecoder().decode(data);
-		if (!directory.includes('[Content_Types].xml') || !directory.includes('word/document.xml')) return null;
-		return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+		const formats: Record<string, [string, string]> = {
+			docx: ['word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+			pptx: ['ppt/presentation.xml', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+			xlsx: ['xl/workbook.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+		};
+		const [entry, type] = formats[ext];
+		return directory.includes('[Content_Types].xml') && directory.includes(entry) ? type : null;
+	}
+	if (ext && ['doc', 'ppt', 'xls'].includes(ext) && signature.startsWith('\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1')) {
+		return { doc: 'application/msword', ppt: 'application/vnd.ms-powerpoint', xls: 'application/vnd.ms-excel' }[ext] ?? null;
 	}
 	if (ext === 'png' && signature.startsWith('\x89PNG\r\n\x1a\n')) return 'image/png';
 	if ((ext === 'jpg' || ext === 'jpeg') && head[0] === 255 && head[1] === 216 && head[2] === 255) return 'image/jpeg';

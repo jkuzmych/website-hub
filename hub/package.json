@@ -4,6 +4,8 @@
 	"type": "module",
 	"scripts": {
 		"dev": "wrangler dev",
+		"dev:local": "wrangler dev --local --ip 127.0.0.1 --port 8788 --var DEV_MODE:true --var APP_URL:http://localhost:8788 --var APP_SECRET:local-development-only",
+		"db:seed:local": "node scripts/seed-demo.mjs",
 		"deploy": "wrangler deploy",
 		"db:migrate:local": "wrangler d1 migrations apply agenticaiuw-hub --local",
 		"db:migrate": "wrangler d1 migrations apply agenticaiuw-hub --remote",

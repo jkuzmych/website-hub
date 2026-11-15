@@ -1,4 +1,77 @@
-// Small progressive enhancements. Every page works without this file.
+// Small browser interactions for the server-rendered pages.
+
+for (const form of document.querySelectorAll('[data-meeting-filters]')) {
+	let pending;
+	form.addEventListener('change', async () => {
+		const count = form.querySelectorAll('input[name="team"]:checked').length;
+		form.querySelector('[data-team-filter-label]').textContent = count ? `Teams (${count}) ▾` : 'All teams ▾';
+		const params = new URLSearchParams(new FormData(form));
+		if (!params.get('kind')) params.delete('kind');
+		if (!params.get('date')) { params.delete('date'); params.delete('date_mode'); }
+		const url = `${form.action}${params.size ? `?${params}` : ''}`;
+		pending?.abort();
+		pending = new AbortController();
+		try {
+			const response = await fetch(url, { signal: pending.signal });
+			if (!response.ok) throw new Error('Could not load meetings');
+			const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+			const results = doc.getElementById('meeting-filter-results');
+			if (!results) throw new Error('Missing meeting results');
+			document.getElementById('meeting-filter-results').replaceWith(results);
+			history.replaceState(null, '', url);
+		} catch (error) {
+			if (error.name !== 'AbortError') location.assign(url);
+		}
+	});
+}
+
+for (const group of document.querySelectorAll('[data-meeting-tabs]')) {
+	const tabs = [...group.querySelectorAll('[role="tab"]')];
+	const select = (tab, updateUrl = false) => {
+		for (const option of tabs) {
+			const selected = option === tab;
+			option.setAttribute('aria-selected', String(selected));
+			option.tabIndex = selected ? 0 : -1;
+			document.getElementById(option.getAttribute('aria-controls')).hidden = !selected;
+		}
+		if (updateUrl) history.replaceState(null, '', tab.href);
+	};
+	for (const [index, tab] of tabs.entries()) {
+		tab.addEventListener('click', (event) => {
+			if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+			event.preventDefault();
+			select(tab, true);
+		});
+		tab.addEventListener('keydown', (event) => {
+			const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+				: event.key === 'ArrowRight' ? (index + 1) % tabs.length
+				: event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : null;
+			if (next === null) return;
+			event.preventDefault();
+			select(tabs[next], true);
+			tabs[next].focus();
+		});
+	}
+	const revealAnchor = () => {
+		const target = document.getElementById(location.hash.slice(1));
+		const panel = target?.closest('[role="tabpanel"]');
+		if (!panel || !group.contains(panel)) return;
+		select(tabs.find((tab) => tab.getAttribute('aria-controls') === panel.id));
+		target.scrollIntoView({ block: 'start' });
+	};
+	revealAnchor();
+	window.addEventListener('hashchange', revealAnchor);
+}
+
+for (const button of document.querySelectorAll('[data-members-dialog]')) {
+	const dialog = document.getElementById(button.dataset.membersDialog);
+	if (!(dialog instanceof HTMLDialogElement)) continue;
+	button.addEventListener('click', () => dialog.showModal());
+	dialog.addEventListener('close', () => button.focus());
+	dialog.addEventListener('click', (e) => {
+		if (e.target === dialog) dialog.close();
+	});
+}
 
 // Confirm destructive actions: <form data-confirm> or <button data-confirm>.
 document.addEventListener('submit', (e) => {

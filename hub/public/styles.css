@@ -399,12 +399,29 @@ tr.inactive, .team.inactive { opacity: 0.55; }
 .roster a { font-weight: 500; text-decoration: none; }
 .roster .muted { font-size: 13px; }
 
-/* Columns rather than a grid, so a long team doesn't leave a gap under the short ones beside it. */
-.teams { columns: 300px 3; column-gap: 16px; }
-.team { display: flex; flex-direction: column; padding: 0; break-inside: avoid; margin-bottom: 16px; }
-.team-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 12px 12px 16px; border-bottom: 1px solid var(--line); }
+/* Compact team cards keep roster and management controls inside dialogs. */
+.teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.team { display: flex; flex-direction: column; padding: 0; min-width: 0; }
+.team-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 16px 8px; }
 .team-head h2 { font-size: 16px; }
 .team-head p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.team > .members-control { padding: 10px 16px; }
+.team-actions { display: flex; align-items: center; gap: 6px; padding: 0 16px 16px; margin-top: auto; }
+.team-add-button { width: 32px; height: 32px; font-size: 22px; font-weight: 400; }
+.members-dialog {
+	width: min(34rem, calc(100% - 2rem));
+	max-height: calc(100dvh - 2rem);
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	background: var(--surface);
+	color: var(--fg);
+	box-shadow: var(--shadow);
+}
+.members-dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+.members-dialog-content { padding: 16px; }
+.members-dialog-content > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.members-dialog .team-members li { flex-wrap: wrap; padding-inline: 0; }
 .team-members { list-style: none; margin: 0; padding: 4px 0; font-size: 14px; }
 .team-members li { display: flex; align-items: center; gap: 4px; padding: 3px 8px 3px 16px; min-height: 36px; }
 .team-members li:hover { background: var(--surface-2); }
@@ -427,7 +444,27 @@ tr.inactive, .team.inactive { opacity: 0.55; }
 .board-card { display: grid; gap: 5px; min-width: 0; padding: 10px; overflow-wrap: anywhere; }
 .board-card .inline-tools select { flex: 1; }
 .selection-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 6px 12px; }
-.agenda-items { padding-left: 2.25rem; }
+.meeting-agenda { margin-bottom: 24px; }
+.agenda-heading { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+.agenda-heading > .section-title { margin: 0; }
+.agenda-add-button { width: 32px; height: 32px; font-size: 22px; font-weight: 400; }
+.agenda-items { margin: 12px 0 0; padding: 0; list-style: none; gap: 0; }
+.agenda-items > li { min-width: 0; overflow-wrap: anywhere; }
+.agenda-items > li + li { border-top: 1px solid var(--line); }
+.meeting-tabs { margin-bottom: 24px; }
+.summary-entry { padding-block: 14px; border-top: 1px solid var(--line); }
+.summary-attribution { margin: 8px 0 4px; }
+.summary-history { margin-top: 8px; }
+.summary-revision { padding: 8px 12px; margin-top: 8px; background: var(--surface-2); border-radius: 6px; }
+.meeting-tabs > a[aria-selected='true'] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 0 0 1px var(--line); }
+.meeting-tab-panel[hidden] { display: none; }
+.agenda-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 4px; border: 0; border-radius: 4px; background: transparent; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.agenda-row:hover { background: var(--surface-2); }
+.agenda-row-main { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+.agenda-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.agenda-attachment { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; color: var(--muted); font-size: 12px; }
+.agenda-duration { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.agenda-author { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 13px; }
 .agenda-items details, .attendance-history .table-scroll { margin-top: 8px; }
 .agenda-items details > summary, .attendance-history > summary { margin-bottom: 4px; }
 #files audio { max-width: 100%; }
@@ -435,9 +472,10 @@ tr.inactive, .team.inactive { opacity: 0.55; }
 .attendance-sheet { border-collapse: separate; border-spacing: 0; white-space: nowrap; font-size: .84rem; }
 .attendance-sheet th, .attendance-sheet td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
 .attendance-sheet th:first-child { position: sticky; left: 0; background: var(--surface); }
-.team-add { padding: 8px 12px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; }
+.team-add { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.team-add select { flex: 1; min-width: 0; }
 .team-add select { color: var(--muted); }
-.new-team { display: flex; gap: 8px; max-width: 420px; }
+.teams-title { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .archived-teams { margin-top: 28px; }
 .archived-teams > summary { color: var(--muted); font-size: 14px; margin-bottom: 12px; }
 
@@ -478,3 +516,8 @@ td.answer { min-width: 180px; white-space: pre-wrap; }
 .screen-tools input { width: 80px; margin-left: 6px; }
 .screen-tools a { color: var(--faint); }
 @media (max-width: 760px) { .screen { grid-template-columns: minmax(0, 1fr); } .screen-qr { justify-self: center; width: min(100%, 420px); } }
+
+.meeting-team-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; }
+.team-filter-panel { left: 0; right: auto; width: max-content; max-width: min(320px, 90vw); max-height: 280px; overflow-y: auto; padding: 8px; }
+.team-filter-panel .check { padding: 7px 8px; }
+.meeting-team-filter input[type='date'] { width: auto; }

@@ -33,6 +33,25 @@ export function Empty({ children }: { children: Child }) {
 	return <p class="empty">{children}</p>;
 }
 
+export function MembersDialog({ id, name, count, children }: { id: string; name: string; count: number; children: Child }) {
+	return (
+		<div class="members-control">
+			<button type="button" class="btn small" aria-haspopup="dialog" aria-controls={id} data-members-dialog={id}>
+				Members ({count})
+			</button>
+			<dialog id={id} class="members-dialog" aria-labelledby={`${id}-title`}>
+				<div class="members-dialog-content">
+					<header>
+						<h2 id={`${id}-title`}>{name} members</h2>
+						<form method="dialog"><button class="btn small" autofocus>Close</button></form>
+					</header>
+					{children}
+				</div>
+			</dialog>
+		</div>
+	);
+}
+
 export function Markdown({ text, empty }: { text: string; empty?: string }) {
 	if (!text.trim()) return empty ? <Empty>{empty}</Empty> : null;
 	return <div class="prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;

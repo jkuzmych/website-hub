@@ -7,14 +7,14 @@ import { isExec } from '../perm';
 import type { AppEnv, Member, TaskRow, Team } from '../types';
 import { Kanban } from '../views/board';
 import { page } from '../views/layout';
-import { Empty, Field, Markdown, MemberSelect, PageHead, PostButton, Tabs } from '../views/ui';
+import { Empty, Field, Markdown, MemberSelect, MembersDialog, PageHead, PostButton, Tabs } from '../views/ui';
 
 export const teamPageRoutes = new Hono<AppEnv>();
 export type Subteam = { id: number; team_id: number; name: string; description: string; archived: number };
-export type RosterMember = Pick<Member, 'id' | 'name' | 'available_hours'> & { is_lead: number; can_manage_page: number };
+export type RosterMember = Pick<Member, 'id' | 'name' | 'role' | 'available_hours'> & { is_lead: number; can_manage_page: number };
 
 export function teamRoster(db: D1Database, team: number) {
-	return all<RosterMember>(db, `SELECT m.id, m.name, m.available_hours, tm.is_lead, tm.can_manage_page
+	return all<RosterMember>(db, `SELECT m.id, m.name, m.role, m.available_hours, tm.is_lead, tm.can_manage_page
 	 FROM team_members tm JOIN members m ON m.id = tm.member_id
 	 WHERE tm.team_id = ? AND m.active = 1 ORDER BY m.name COLLATE NOCASE`, team);
 }
@@ -23,19 +23,19 @@ export function teamSubteams(db: D1Database, team: number) {
 	return all<Subteam>(db, 'SELECT * FROM subteams WHERE team_id = ? ORDER BY archived, name COLLATE NOCASE', team);
 }
 
-function rosterPanel(members: RosterMember[], grantPath?: string) {
+function rosterPanel(id: string, name: string, members: RosterMember[], grantPath?: string) {
 	return (
-		<details class="card">
-			<summary class="link-btn">Members ({members.length})</summary>
+		<MembersDialog id={id} name={name} count={members.length}>
 			{members.length ? <ul class="team-members">{members.map((m) => (
 				<li><a href={`/people/${m.id}`}>{m.name}</a> {m.is_lead ? <span class="tag lead">Lead</span> : null}
+					{m.role === 'exec' && <span class="tag exec">Exec</span>}
 					<span class="hint">{m.available_hours == null ? 'Hours not set' : `${m.available_hours} h/week`}</span>
 					{m.can_manage_page ? <span class="tag">Page admin</span> : null}
 					{grantPath && <PostButton action={`${grantPath}/${m.id}`} name="enabled" value={m.can_manage_page ? '0' : '1'}
 						label={m.can_manage_page ? 'Remove page access' : 'Grant page access'} cls="btn small" />}
 				</li>
 			))}</ul> : <Empty>No members yet.</Empty>}
-		</details>
+		</MembersDialog>
 	);
 }
 
@@ -72,7 +72,7 @@ teamPageRoutes.get('/teams/:id', async (c) => {
 			<Markdown text={team.description} empty="No team description yet." />
 			{resources.length > 0 && <nav class="inline-tools" aria-label="Team links">{resources.map(([label, url]) =>
 				<a class="btn small" href={url} target="_blank" rel="noopener noreferrer">{label} ↗</a>)}</nav>}
-			{rosterPanel(members, isExec(v) ? `${root}/page-admins` : undefined)}
+			{rosterPanel(`team-${team.id}-members`, team.name, members, isExec(v) ? `${root}/page-admins` : undefined)}
 			{editable && (
 				<details class="card">
 					<summary class="link-btn">Team page settings</summary>
@@ -96,7 +96,7 @@ teamPageRoutes.get('/teams/:id', async (c) => {
 				<section class="stack">
 					<h2 class="section-title">{selected.name}</h2>
 					<Markdown text={selected.description} empty="No subteam description yet." />
-					{rosterPanel(members.filter((m) => subgroup.has(m.id)))}
+					{rosterPanel(`subteam-${selected.id}-members`, selected.name, members.filter((m) => subgroup.has(m.id)))}
 					{editable && <details class="card">
 						<summary class="link-btn">Subteam settings</summary>
 						<form method="post" action={`${root}/subteams/${selected.id}`} class="stack">

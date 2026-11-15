@@ -8,7 +8,7 @@ import type { AppEnv, MeetingRow, Viewer } from '../types';
 import { Field, Markdown, PostButton } from '../views/ui';
 import { loadMeeting } from './meeting-access';
 
-type Agenda = { id: number; title: string; author_id: number | null; author_name: string; position: number; version: number; removed: number; body: string | null; note_version: number | null };
+type Agenda = { id: number; title: string; duration_minutes: number; author_id: number | null; author_name: string; position: number; version: number; removed: number; body: string | null; note_version: number | null };
 type Attachment = { id: string; agenda_id: number | null; author_id: number | null; name: string; media_type: string; size: number };
 type Content = { agenda: Agenda[]; files: Attachment[] };
 type Props = { m: MeetingRow; viewer: Viewer; content: Content; zone: string };
@@ -62,16 +62,40 @@ export function MeetingAgenda({ m, viewer, content, zone }: Props) {
 	const ended = meetingTiming(m, zone).ended;
 	const editor = canEditMeeting(viewer, m);
 	return (
-		<div class="stack">
-			{agenda.length > 0 && <ol class="card stack agenda-items">
+		<section class="card meeting-agenda" aria-labelledby="agenda">
+			<div class="agenda-heading">
+				<h2 class="section-title" id="agenda">Agenda</h2>
+				{!ended && <button type="button" class="icon-btn agenda-add-button" aria-label="Add agenda item"
+					title="Add agenda item" aria-haspopup="dialog" aria-controls="add-agenda-dialog" data-members-dialog="add-agenda-dialog">
+					<span aria-hidden="true">+</span>
+				</button>}
+			</div>
+			<Markdown text={m.agenda} empty={agenda.length ? undefined : 'No agenda recorded.'} />
+			{agenda.length > 0 && <ol class="stack agenda-items">
 				{agenda.map((item, i) => {
 					const path = `${root}/agenda/${item.id}`;
 					const writable = canWrite(m, viewer, zone, item.author_id);
+					const files = content.files.filter((f) => f.agenda_id === item.id);
 					return (
 						<li>
-							<strong>{item.title}</strong> <span class="hint">{item.author_name}</span>
+							<button type="button" class="agenda-row" aria-haspopup="dialog" aria-controls={`agenda-item-${item.id}`}
+								data-members-dialog={`agenda-item-${item.id}`}>
+								<span class="agenda-row-main">
+									<strong class="agenda-item-title" title={item.title}>{item.title}</strong>
+									{files.length > 0 && <span class="agenda-attachment" aria-label={`${files.length} attached ${files.length === 1 ? 'file' : 'files'}`} title={files.map((f) => f.name).join(', ')}>
+										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m21 11-8 8a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8-8" /></svg>
+										{files.length}
+									</span>}
+									<span class="agenda-duration">~{item.duration_minutes} min</span>
+								</span>
+								<span class="agenda-author">{item.author_name}</span>
+							</button>
+							<dialog id={`agenda-item-${item.id}`} class="members-dialog" aria-labelledby={`agenda-item-${item.id}-title`}>
+								<div class="members-dialog-content stack">
+									<header><h2 id={`agenda-item-${item.id}-title`}>{item.title}</h2><form method="dialog"><button class="btn small">Close</button></form></header>
+									<p class="hint">{item.author_name} · ~{item.duration_minutes} min</p>
 							<details>
-								<summary class="link-btn">Speaker notes and files</summary>
+								<summary class="link-btn">{item.body ? "Speaker notes" : "Add speaker notes"}{files.length ? ` ? ${files.length} ${files.length === 1 ? "file" : "files"}` : ""}</summary>
 								{writable ? (
 									<form class="stack" method="post" action={`${path}/notes`}>
 										<input type="hidden" name="version" value={item.note_version ?? 0} />
@@ -79,7 +103,7 @@ export function MeetingAgenda({ m, viewer, content, zone }: Props) {
 										<div><button class="btn small">Save notes</button></div>
 									</form>
 								) : <Markdown text={item.body ?? ''} empty="No speaker notes." />}
-								<FileList m={m} files={content.files.filter((f) => f.agenda_id === item.id)} writable={() => writable} />
+								<FileList m={m} files={files} writable={() => writable} />
 								{writable && <Upload root={root} agenda={item.id} />}
 							</details>
 							{writable && <details>
@@ -87,6 +111,7 @@ export function MeetingAgenda({ m, viewer, content, zone }: Props) {
 								<form class="inline-tools" method="post" action={path}>
 									<input type="hidden" name="version" value={item.version} />
 									<input name="title" maxlength={200} required value={item.title} aria-label="Agenda item title" />
+									<Field label="How long (minutes)"><input type="number" name="duration_minutes" required min={1} max={1440} step={1} value={item.duration_minutes} /></Field>
 									<button class="btn small">Save</button>
 								</form>
 								<div class="inline-tools">
@@ -94,19 +119,30 @@ export function MeetingAgenda({ m, viewer, content, zone }: Props) {
 									<PostButton action={`${path}/remove`} label="Remove item" cls="btn small danger" name="version" value={String(item.version)} confirm="Remove this agenda item? Its notes and files will stay with the meeting." />
 								</div>
 							</details>}
+								</div>
+							</dialog>
 						</li>
 					);
 				})}
 			</ol>}
-			{!ended && <details class="card">
-				<summary class="link-btn">Add agenda item</summary>
-				<form class="stack" method="post" action={`${root}/agenda`}>
+			{!ended && <dialog id="add-agenda-dialog" class="members-dialog" aria-labelledby="add-agenda-title">
+				<div class="members-dialog-content stack">
+					<header>
+						<h2 id="add-agenda-title">Add agenda item</h2>
+						<form method="dialog"><button class="btn small">Close</button></form>
+					</header>
+				<form class="stack" method="post" enctype="multipart/form-data" action={`${root}/agenda`}>
 					<Field label="Agenda item"><input name="title" maxlength={200} required /></Field>
+					<Field label="How long (minutes)"><input type="number" name="duration_minutes" required min={1} max={1440} step={1} value={2} /></Field>
 					<Field label="Speaker notes"><textarea name="notes" maxlength={10000} rows={2}></textarea></Field>
+					<Field label="Attachment (optional)" hint="PDF, Word, PowerPoint, Excel, text, images or audio. Up to 8 MiB.">
+						<input type="file" name="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.png,.jpg,.jpeg,.gif,.webp,.wav,.mp3,.ogg,.flac,.m4a" />
+					</Field>
 					<div><button class="btn small primary">Add item</button></div>
 				</form>
-			</details>}
-		</div>
+				</div>
+			</dialog>}
+		</section>
 	);
 }
 
@@ -117,27 +153,64 @@ export function MeetingFiles({ m, viewer, content, zone }: Props) {
 			{content.agenda.filter((item) => item.removed && item.body).map((item) => (
 				<div class="card"><strong>{item.title}</strong><Markdown text={item.body ?? ''} /></div>
 			))}
-			<h3 class="section-title">Attachments</h3>
 			<FileList m={m} files={content.files} writable={(file) => canWrite(m, viewer, zone, file.agenda_id === null ? file.author_id : byId.get(file.agenda_id)?.author_id ?? null)} />
 			{canWrite(m, viewer, zone, viewer.id) && <Upload root={`/meetings/${m.id}`} />}
 		</section>
 	);
 }
 
-meetingContentRoutes.post('/meetings/:id/agenda', async (c) => {
+meetingContentRoutes.post('/meetings/:id/agenda', bodyLimit({ maxSize: FILE_LIMIT + 65536 }), async (c) => {
 	const v = c.get('viewer');
 	const m = await loadMeeting(c, v, c.req.param('id'));
 	if (!m) return c.notFound();
 	const form = await readForm(c);
 	const title = str(form.title, 200);
+	const durationText = str(form.duration_minutes);
+	const duration = Number(durationText);
 	const notes = str(form.notes, 10000);
 	const path = `/meetings/${m.id}`;
 	if (!title) return c.redirect(`${path}?error=missing#agenda`);
 	if (meetingTiming(m, c.env.TIMEZONE).ended) return c.redirect(`${path}?error=forbidden#agenda`);
+	if (!/^\d+$/.test(durationText) || !Number.isInteger(duration) || duration < 1 || duration > 1440) return c.redirect(`${path}?error=duration#agenda`);
 	const db = c.env.DB;
-	const insert = db.prepare(`INSERT INTO meeting_agenda (meeting_id, author_id, author_name, title, position)
-	 SELECT ?1, ?2, ?3, ?4, COALESCE(MAX(position), 0) + 1 FROM meeting_agenda WHERE meeting_id = ?1`)
-		.bind(m.id, v.id, v.name, title);
+	const file = form.file;
+	// Browsers submit an empty, unnamed File when the optional field is unused.
+	if (file && !(typeof file !== 'string' && !Array.isArray(file) && !file.name && !file.size)) {
+		if (typeof file === 'string' || Array.isArray(file) || !file.size || file.size > FILE_LIMIT) {
+			return c.redirect(`${path}?error=file#agenda`);
+		}
+		const bytes = await file.arrayBuffer();
+		const type = meetingFileType(file.name, bytes);
+		if (!type) return c.redirect(`${path}?error=file#agenda`);
+		const fileId = crypto.randomUUID();
+		// One transaction saves the file, agenda and notes together. A full storage
+		// budget creates none of them, so retrying cannot leave a partial agenda.
+		const writes = [
+			db.prepare(`INSERT INTO meeting_attachments (id, meeting_id, original_meeting_id, author_id, name, media_type, size)
+			 SELECT ?1, ?2, ?2, ?3, ?4, ?5, ?6
+			 WHERE (SELECT COALESCE(SUM(size), 0) FROM meeting_attachments WHERE meeting_id = ?2) + ?6 <= ?7
+			 AND (SELECT COALESCE(SUM(size), 0) FROM meeting_attachments) + ?6 <= ?8`)
+				.bind(fileId, m.id, v.id, file.name, type, bytes.byteLength, MEETING_FILE_BUDGET, TOTAL_FILE_BUDGET),
+			db.prepare(`INSERT INTO meeting_agenda (meeting_id, author_id, author_name, title, position, duration_minutes)
+			 SELECT ?1, ?2, ?3, ?4, (SELECT COALESCE(MAX(position), 0) + 1 FROM meeting_agenda WHERE meeting_id = ?1), ?6
+			 WHERE EXISTS (SELECT 1 FROM meeting_attachments WHERE id = ?5)`)
+				.bind(m.id, v.id, v.name, title, fileId, duration),
+			db.prepare('UPDATE meeting_attachments SET agenda_id = last_insert_rowid(), original_agenda_id = last_insert_rowid() WHERE id = ?')
+				.bind(fileId)
+		];
+		if (notes) writes.push(db.prepare(`INSERT INTO meeting_speaker_notes (meeting_id, agenda_id, body)
+		 SELECT meeting_id, agenda_id, ? FROM meeting_attachments WHERE id = ?`).bind(notes, fileId));
+		for (let offset = 0; offset < bytes.byteLength; offset += FILE_PART) {
+			writes.push(db.prepare(`INSERT INTO meeting_attachment_chunks (file_id, part, data)
+			 SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM meeting_attachments WHERE id = ?1)`)
+				.bind(fileId, offset / FILE_PART, bytes.slice(offset, offset + FILE_PART)));
+		}
+		const [saved] = await db.batch(writes);
+		return c.redirect(`${path}?${saved.meta.changes ? 'ok=created' : 'error=file-space'}#agenda`);
+	}
+	const insert = db.prepare(`INSERT INTO meeting_agenda (meeting_id, author_id, author_name, title, position, duration_minutes)
+	 SELECT ?1, ?2, ?3, ?4, COALESCE(MAX(position), 0) + 1, ?5 FROM meeting_agenda WHERE meeting_id = ?1`)
+		.bind(m.id, v.id, v.name, title, duration);
 	if (notes) {
 		await db.batch([insert, db.prepare('INSERT INTO meeting_speaker_notes (meeting_id, agenda_id, body) VALUES (?, last_insert_rowid(), ?)').bind(m.id, notes)]);
 	} else {
@@ -186,8 +259,11 @@ meetingContentRoutes.post('/meetings/:id/agenda/:item/:operation?', async (c) =>
 		result = await run(db, 'UPDATE meeting_agenda SET removed = 1, version = version + 1 WHERE id = ? AND version = ? AND removed = 0', item.id, version);
 	} else if (!operation) {
 		const title = str(form.title, 200);
+		const durationText = str(form.duration_minutes);
+		const duration = Number(durationText);
 		if (!title) return c.redirect(`${path}?error=missing#agenda`);
-		result = await run(db, 'UPDATE meeting_agenda SET title = ?, version = version + 1 WHERE id = ? AND version = ? AND removed = 0', title, item.id, version);
+		if (!/^\d+$/.test(durationText) || !Number.isInteger(duration) || duration < 1 || duration > 1440) return c.redirect(`${path}?error=duration#agenda`);
+		result = await run(db, 'UPDATE meeting_agenda SET title = ?, duration_minutes = ?, version = version + 1 WHERE id = ? AND version = ? AND removed = 0', title, duration, item.id, version);
 	} else {
 		return c.notFound();
 	}

@@ -12,7 +12,8 @@ import { page } from '../views/layout';
 import { Choice, Empty, Field, Markdown, MemberSelect, PageHead, PeoplePicker, Tabs, TaskList } from '../views/ui';
 import { FormSection, formForMeeting } from './forms';
 import { loadMeeting } from './meeting-access';
-import { MeetingAgenda, MeetingFiles, meetingContent } from './meeting-content';
+import { MeetingAgenda, meetingContent } from './meeting-content';
+import { MeetingSummary, summaryRevisions } from './meeting-summary';
 import { createTasks } from './tasks';
 
 export const meetingRoutes = new Hono<AppEnv>();
@@ -41,11 +42,15 @@ meetingRoutes.get('/meetings', async (c) => {
 	const v = c.get('viewer');
 	const today = todayIn(c.env.TIMEZONE);
 	const events = c.req.query('kind') === 'event';
-	const team = events ? null : id(c.req.query('team'));
+	const selectedTeams = [...new Set((c.req.queries('team') ?? []).flatMap((value) => value.split(',')).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+	const dateMode = ['before', 'after', 'on'].includes(c.req.query('date_mode') ?? '') ? c.req.query('date_mode')! : 'on';
+	const rawDate = c.req.query('date') ?? '';
+	const date = isDate(rawDate) ? rawDate : '';
 	const where = [visible(v, MEETING_VISIBLE)];
 	const params: (string | number)[] = [v.id, today];
 	if (events) where.push("m.kind = 'event'");
-	if (team) where.push(`m.id IN (SELECT meeting_id FROM meeting_teams WHERE team_id = ?${params.push(team)})`);
+	if (selectedTeams.length) where.push(`m.id IN (SELECT meeting_id FROM meeting_teams WHERE team_id IN (SELECT value FROM json_each(?${params.push(JSON.stringify(selectedTeams))})))`);
+	if (date) where.push(`m.date ${dateMode === 'before' ? '<' : dateMode === 'after' ? '>' : '='} ?${params.push(date)}`);
 	const [upcoming, past, teamList] = await Promise.all([
 		all<MeetingListRow>(c.env.DB, `${LIST_SELECT} WHERE ${where.join(' AND ')} AND m.date >= ?2 ORDER BY m.date, m.time LIMIT 300`, ...params),
 		all<MeetingListRow>(c.env.DB, `${LIST_SELECT} WHERE ${where.join(' AND ')} AND m.date < ?2 ORDER BY m.date DESC, m.time DESC LIMIT 300`, ...params),
@@ -131,13 +136,26 @@ meetingRoutes.get('/meetings', async (c) => {
 				}
 			/>
 			<div class="toolbar">
-				<Tabs<string | number>
-					label="Show"
-					current={events ? 'events' : team}
-					href={(t) => (t === 'events' ? '/meetings?kind=event' : t ? `/meetings?team=${t}` : '/meetings')}
-					options={[[null, 'All'], ['events', 'Club events'], ...visibleTeams.map((t): [number, string] => [t.id, t.name])]}
-				/>
+				<form method="get" action="/meetings" class="meeting-team-filter" data-meeting-filters>
+					<div class="seg" aria-label="Meeting type">
+						<label><input type="radio" name="kind" value="" checked={!events} /><span>All</span></label>
+						<label><input type="radio" name="kind" value="event" checked={events} /><span>Club events</span></label>
+					</div>
+					<details class="menu team-filter-menu">
+						<summary class="btn" data-team-filter-label>{selectedTeams.length ? `Teams (${selectedTeams.length})` : 'All teams'} ▾</summary>
+						<div class="menu-panel team-filter-panel" aria-label="Filter by teams">
+							{visibleTeams.map((t) => <label class="check"><input type="checkbox" name="team" value={String(t.id)} checked={selectedTeams.includes(t.id)} /> {t.name}</label>)}
+						</div>
+					</details>
+					<label class="sr-only" for="meeting-date-mode">Date comparison</label>
+					<select id="meeting-date-mode" name="date_mode" aria-label="Date comparison">
+						<option value="before" selected={dateMode === 'before'}>Before</option><option value="after" selected={dateMode === 'after'}>After</option><option value="on" selected={dateMode === 'on'}>On</option>
+					</select>
+					<input type="date" name="date" value={date} aria-label="Meeting date" />
+					<noscript><button class="btn small">Apply filters</button></noscript>
+				</form>
 			</div>
+			<div id="meeting-filter-results" aria-live="polite">
 			<h2 class="section-title">Upcoming</h2>
 			{soon.length ? table(soon, true) : <Empty>{later.length ? 'Nothing in the next three weeks.' : 'Nothing scheduled.'}</Empty>}
 			{later.length > 0 && (
@@ -150,6 +168,7 @@ meetingRoutes.get('/meetings', async (c) => {
 			)}
 			<h2 class="section-title">Past</h2>
 			{past.length ? table(past, false) : <Empty>None yet.</Empty>}
+			</div>
 		</>
 	);
 });
@@ -645,14 +664,15 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 	const today = todayIn(c.env.TIMEZONE);
 	const editable = canEditMeeting(v, m);
 	const remindAt = meetingReminderAt(m);
-	const [roster, actions, people, toRemind, form, content, attendance] = await Promise.all([
+	const [roster, actions, people, toRemind, form, content, attendance, summary] = await Promise.all([
 		rosterFor(c.env.DB, m),
 		all<TaskRow>(c.env.DB, `${TASK_SELECT} WHERE t.meeting_id = ? ORDER BY t.status = 'open' DESC, t.due_date, a.name`, m.id),
 		editable ? activeMembers(c.env.DB) : Promise.resolve([] as Member[]),
 		editable && m.date >= today ? meetingPeople(c.env.DB, m) : Promise.resolve([] as Member[]),
 		formForMeeting(c.env.DB, m.id),
 		meetingContent(c.env.DB, m.id),
-		attendanceHistory(c.env.DB, m, v)
+		attendanceHistory(c.env.DB, m, v),
+		summaryRevisions(c.env.DB, m.id)
 	]);
 	const reminded = m.reminded_on === remindAt.date;
 	const remindLater = remindAt.date > today || (remindAt.date === today && hourIn(c.env.TIMEZONE) < remindAt.hour);
@@ -662,6 +682,7 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 	const defaultDue = addDays(m.date > today ? m.date : today, 7);
 	const joint = m.kind === 'meeting' && meetingTeams(m).length > 1;
 	const timing = meetingTiming(m, c.env.TIMEZONE);
+	const followUp = c.req.query('view') === 'follow-up' || (c.req.query('view') !== 'preparation' && timing.ended);
 	const myAttendance = roster.find((r) => r.id === v.id);
 	const canCheckIn = timing.started && !timing.ended && (m.kind === 'event' || !!myAttendance)
 		&& (!myAttendance?.status || myAttendance.self_report === 1);
@@ -697,42 +718,17 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 				}
 			/>
 
-			<div class="grid-2 wide-left">
-				<section>
-					<h2 class="section-title" id="agenda">Agenda</h2>
-					<Markdown text={m.agenda} empty={content.agenda.some((item) => !item.removed) ? undefined : 'No agenda recorded.'} />
-					<MeetingAgenda m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
-					<h2 class="section-title">Notes</h2>
-					<Markdown text={m.notes} empty="No notes yet." />
-					<MeetingFiles m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
-
-					<h2 class="section-title" id="actions">
-						Action items
-					</h2>
-					<TaskList tasks={actions} today={today} viewer={v} show={['assignee']} back={`/meetings/${m.id}#actions`} empty="No action items yet." />
-					{editable && (
-						<form method="post" action={`/meetings/${m.id}/actions`} class="card action-form">
-							<p class="hint">
-								{joint ? `Each action item becomes a task on the person's team (${teamNames(m)})` : `Each action item becomes a ${m.team_name} task`}: the person is emailed now and reminded until it's done.
-							</p>
-							<div class="action-rows" data-rows>
-								<div class="action-row" data-row>
-									<input name="title" placeholder="What needs to happen" maxlength={200} aria-label="Action item" />
-									<MemberSelect name="assignee" members={people} blank="Who" />
-									<input type="date" name="due" value={defaultDue} aria-label="Due date" />
-								</div>
-							</div>
-							<div class="form-actions">
-								<button type="button" class="btn ghost" data-add-row>
-									+ Another
-								</button>
-								<button class="btn primary">Add action items</button>
-							</div>
-						</form>
-					)}
-				</section>
-
-				<aside>
+			<div data-meeting-tabs>
+				<nav class="seg meeting-tabs" role="tablist" aria-label="Meeting stages">
+					<a id="preparation-tab" role="tab" aria-controls="meeting-preparation" aria-selected={!followUp} tabindex={followUp ? -1 : 0} href={`/meetings/${m.id}?view=preparation`}>Agenda</a>
+					<a id="follow-up-tab" role="tab" aria-controls="meeting-follow-up" aria-selected={followUp} tabindex={followUp ? 0 : -1} href={`/meetings/${m.id}?view=follow-up`}>Summary</a>
+				</nav>
+				<div id="meeting-preparation" class="meeting-tab-panel grid-2 wide-left" role="tabpanel" aria-labelledby="preparation-tab" hidden={followUp}>
+					<section>
+						<MeetingAgenda m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
+						<FormSection m={m} f={form} editable={editable} appUrl={c.env.APP_URL} />
+					</section>
+					<aside>
 					{toRemind.length > 0 && (reminded || remindLater) && (
 						<p class="hint reminder-note">
 							{reminded
@@ -807,7 +803,40 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 						</>
 					)}
 					<AttendanceHistory roster={roster} {...attendance} zone={c.env.TIMEZONE} />
-				</aside>
+					</aside>
+				</div>
+				<div id="meeting-follow-up" class="meeting-tab-panel grid-2 wide-left" role="tabpanel" aria-labelledby="follow-up-tab" hidden={!followUp}>
+					<section>
+						<MeetingSummary m={m} revisions={summary} zone={c.env.TIMEZONE} />
+					<h2 class="section-title" id="actions">
+						Action items
+					</h2>
+					<TaskList tasks={actions} today={today} viewer={v} show={['assignee']} back={`/meetings/${m.id}#actions`} empty="No action items yet." />
+					{editable && (
+						<form method="post" action={`/meetings/${m.id}/actions`} class="card action-form">
+							<p class="hint">
+								{joint ? `Each action item becomes a task on the person's team (${teamNames(m)})` : `Each action item becomes a ${m.team_name} task`}: the person is emailed now and reminded until it's done.
+							</p>
+							<div class="action-rows" data-rows>
+								<div class="action-row" data-row>
+									<input name="title" placeholder="What needs to happen" maxlength={200} aria-label="Action item" />
+									<MemberSelect name="assignee" members={people} blank="Who" />
+									<input type="date" name="due" value={defaultDue} aria-label="Due date" />
+								</div>
+							</div>
+							<div class="form-actions">
+								<button type="button" class="btn ghost" data-add-row>
+									+ Another
+								</button>
+								<button class="btn primary">Add action items</button>
+							</div>
+						</form>
+					)}
+					</section>
+					<aside>
+
+					</aside>
+				</div>
 			</div>
 		</>
 	);
@@ -827,7 +856,7 @@ meetingRoutes.post('/meetings/:id/check-in', async (c) => {
 	 AND (?2 = 'event' OR ${MEETING_EXPECTED})
 	 ON CONFLICT(meeting_id, member_id) DO UPDATE SET status = excluded.status
 	 WHERE attendance.self_report = 1`, m.id, m.kind, v.id, status);
-	return c.redirect(`${path}?${result.meta.changes ? 'ok=attendance' : 'error=forbidden'}`);
+	return c.redirect(`${path}?view=follow-up&${result.meta.changes ? 'ok=attendance' : 'error=forbidden'}`);
 });
 
 meetingRoutes.post('/meetings/:id/attendance', async (c) => {
@@ -843,7 +872,7 @@ meetingRoutes.post('/meetings/:id/attendance', async (c) => {
 			db.prepare('DELETE FROM attendance WHERE meeting_id = ? AND member_id IN (SELECT id FROM members WHERE active = 1)').bind(m.id),
 			...came.map((memberId) => db.prepare("INSERT OR REPLACE INTO attendance (meeting_id, member_id, status) VALUES (?, ?, 'present')").bind(m.id, memberId))
 		]);
-		return c.redirect(`/meetings/${m.id}?ok=attendance`);
+		return c.redirect(`/meetings/${m.id}?view=follow-up&ok=attendance`);
 	}
 	const valid = new Set(STATUSES.map(([s]) => s));
 	const stmts: D1PreparedStatement[] = [];
@@ -857,7 +886,7 @@ meetingRoutes.post('/meetings/:id/attendance', async (c) => {
 	const added = id(form.add);
 	if (added) stmts.push(upsert(added, 'present'));
 	if (stmts.length) await c.env.DB.batch(stmts);
-	return c.redirect(`/meetings/${m.id}?ok=attendance`);
+	return c.redirect(`/meetings/${m.id}?view=follow-up&ok=attendance`);
 });
 
 meetingRoutes.post('/meetings/:id/actions', async (c) => {
