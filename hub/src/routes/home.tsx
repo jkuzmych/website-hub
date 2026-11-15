@@ -53,7 +53,7 @@ homeRoutes.get('/', async (c) => {
 	const today = todayIn(c.env.TIMEZONE);
 	const weekOut = addDays(today, 7);
 
-	const [mine, recentDone, assignedByMe, upcoming, recent, clubOverdue, shared] = await Promise.all([
+	const [mine, recentDone, assignedByMe, upcoming, recent, clubOverdue, shared, myTeams] = await Promise.all([
 		all<TaskRow>(db, `${TASK_SELECT} WHERE t.assignee_id = ? AND t.status = 'open' ORDER BY t.due_date, t.id`, v.id),
 		all<TaskRow>(db, `${TASK_SELECT} WHERE t.assignee_id = ? AND t.status = 'done' ORDER BY t.completed_at DESC LIMIT 5`, v.id),
 		canAssign(v)
@@ -70,7 +70,8 @@ homeRoutes.get('/', async (c) => {
 		),
 		all<MeetingRow>(db, `${MEETING_SELECT} WHERE ${visible(v, MEETING_VISIBLE)} AND m.date < ?2 ORDER BY m.date DESC, m.time DESC LIMIT 5`, v.id, today),
 		isExec(v) ? first<{ n: number; people: number }>(db, "SELECT COUNT(*) AS n, COUNT(DISTINCT assignee_id) AS people FROM tasks WHERE status = 'open' AND due_date < ?", today) : Promise.resolve(null),
-		boardTasks(db, v.id, { assignee: v.id, status: 'open' })
+		boardTasks(db, v.id, { assignee: v.id, status: 'open' }),
+		all<{ id: number; name: string }>(db, 'SELECT t.id, t.name FROM teams t JOIN team_members tm ON tm.team_id = t.id WHERE tm.member_id = ? AND t.archived = 0 ORDER BY t.name COLLATE NOCASE', v.id)
 	]);
 
 	const groups = await groupStats(db, assignedByMe);
@@ -88,7 +89,10 @@ homeRoutes.get('/', async (c) => {
 		<>
 			<PageHead
 				eyebrow={formatDate(today)}
-				title={`Hi, ${firstName}`}
+				title={<span class="home-greeting">Hi, {firstName} <span class="home-hours">{v.available_hours == null ? 'Hours not set' : `${v.available_hours} hours/week`}
+					<button type="button" class="icon-btn" aria-label="Edit available hours" title="Edit available hours" aria-haspopup="dialog" aria-controls="edit-availability" data-members-dialog="edit-availability">
+						<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+					</button></span></span>}
 				sub={openCount ? `You have ${openCount} open task${openCount === 1 ? '' : 's'}${overdueCount ? `, ${overdueCount} overdue` : ''}.` : "You're all caught up."}
 				actions={
 					<><a class="btn" href={'/tasks?status=open&team=mine'}>Pick a task</a><a class="btn primary" href="/tasks/new">
@@ -96,11 +100,27 @@ homeRoutes.get('/', async (c) => {
 					</a></>
 				}
 			/>
+			<dialog id="edit-availability" class="members-dialog" aria-labelledby="edit-availability-title">
+				<div class="members-dialog-content stack">
+					<header><h2 id="edit-availability-title">Available hours per week</h2><form method="dialog"><button class="btn small">Close</button></form></header>
+					<form class="stack" method="post" action="/availability">
+						<Field label="Hours per week"><input type="number" name="hours" min="0" max="168" step="any" value={v.available_hours ?? ''} /></Field>
+						<div><button class="btn small primary">Save</button></div>
+					</form>
+				</div>
+			</dialog>
 			{clubOverdue && clubOverdue.n > 0 && (
 				<p class="callout">
 					Across the club, <b>{clubOverdue.n}</b> task{clubOverdue.n === 1 ? ' is' : 's are'} overdue among <b>{clubOverdue.people}</b> {clubOverdue.people === 1 ? 'person' : 'people'}. <a href="/people">See who</a>
 				</p>
 			)}
+			<section class="my-teams" aria-labelledby="my-teams-heading">
+				<h2 class="section-title" id="my-teams-heading">My teams</h2>
+				<div class="my-teams-links">
+					{myTeams.length ? <nav class="seg" aria-label="My teams">{myTeams.map((team) => <a href={`/teams/${team.id}`}>{team.name}</a>)}</nav> : <Empty>You are not on a team yet.</Empty>}
+					<a class="btn small" href="/teams">+ Add team</a>
+				</div>
+			</section>
 
 			<div class="grid-2">
 				<section>
@@ -144,12 +164,6 @@ homeRoutes.get('/', async (c) => {
 					)}
 				</section>
 				<aside>
-					<form class="card stack" method="post" action="/availability">
-						<Field label="Available hours per week">
-							<input type="number" name="hours" min="0" max="168" step="any" value={v.available_hours ?? ''} />
-						</Field>
-						<div><button class="btn small">Save</button></div>
-					</form>
 					<h2 class="section-title">Coming up</h2>
 					<MeetingList meetings={upcoming} today={today} />
 					<h2 class="section-title">Recent meetings</h2>

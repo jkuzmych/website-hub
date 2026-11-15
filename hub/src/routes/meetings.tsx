@@ -12,7 +12,7 @@ import { page } from '../views/layout';
 import { Choice, Empty, Field, Markdown, MemberSelect, PageHead, PeoplePicker, Tabs, TaskList } from '../views/ui';
 import { FormSection, formForMeeting } from './forms';
 import { loadMeeting } from './meeting-access';
-import { MeetingAgenda, meetingContent } from './meeting-content';
+import { MeetingAgenda, MeetingFiles, meetingContent } from './meeting-content';
 import { MeetingSummary, summaryRevisions } from './meeting-summary';
 import { createTasks } from './tasks';
 
@@ -144,7 +144,7 @@ meetingRoutes.get('/meetings', async (c) => {
 					<details class="menu team-filter-menu">
 						<summary class="btn" data-team-filter-label>{selectedTeams.length ? `Teams (${selectedTeams.length})` : 'All teams'} ▾</summary>
 						<div class="menu-panel team-filter-panel" aria-label="Filter by teams">
-							{visibleTeams.map((t) => <label class="check"><input type="checkbox" name="team" value={String(t.id)} checked={selectedTeams.includes(t.id)} /> {t.name}</label>)}
+							{visibleTeams.map((t) => <label class="check"><input type="checkbox" name="team" value={String(t.id)} checked={selectedTeams.includes(t.id)} /><span>{t.name}</span></label>)}
 						</div>
 					</details>
 					<label class="sr-only" for="meeting-date-mode">Date comparison</label>
@@ -726,6 +726,8 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 				<div id="meeting-preparation" class="meeting-tab-panel grid-2 wide-left" role="tabpanel" aria-labelledby="preparation-tab" hidden={followUp}>
 					<section>
 						<MeetingAgenda m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
+						<h2 class="section-title">Attachments</h2>
+						<MeetingFiles m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
 						<FormSection m={m} f={form} editable={editable} appUrl={c.env.APP_URL} />
 					</section>
 					<aside>

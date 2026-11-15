@@ -22,7 +22,6 @@ taskRoutes.get('/tasks', async (c) => {
 	const status = c.req.query('status') ?? 'open';
 	const assignee = id(c.req.query('assignee'));
 	const team = id(c.req.query('team'));
-	const myTeams = c.req.query('team') === 'mine';
 	const q = (c.req.query('q') ?? '').trim().slice(0, 100);
 
 	const where = ['1 = 1'];
@@ -34,7 +33,6 @@ taskRoutes.get('/tasks', async (c) => {
 	else if (status === 'dropped') where.push("t.status = 'dropped'");
 	if (assignee) where.push(`t.assignee_id = ${bind(assignee)}`);
 	if (team) where.push(`t.team_id = ${bind(team)}`);
-	if (myTeams) where.push(`t.team_id IN (SELECT value FROM json_each(${bind(JSON.stringify([...v.teamIds]))}))`);
 	if (q) where.push(`(t.title LIKE ${bind(`%${q}%`)} OR t.details LIKE ?${params.length})`);
 	const order = status === 'done' || status === 'dropped' ? 't.completed_at DESC, t.updated_at DESC' : 't.due_date, t.id';
 
@@ -42,7 +40,7 @@ taskRoutes.get('/tasks', async (c) => {
 		all<TaskRow>(c.env.DB, `${TASK_SELECT} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 300`, ...params),
 		activeMembers(c.env.DB),
 		teams(c.env.DB),
-		boardTasks(c.env.DB, v.id, { team, teamIds: myTeams ? [...v.teamIds] : undefined, assignee, status, q, today })
+		boardTasks(c.env.DB, v.id, { team, assignee, status, q, today })
 	]);
 	const groups = await groupStats(c.env.DB, tasks);
 	const visibleTasks = tasks.map((task) => canSeeTask(v, task) ? task : { ...task, meeting_title: null });
@@ -82,8 +80,7 @@ taskRoutes.get('/tasks', async (c) => {
 				/>
 				<MemberSelect name="assignee" members={people} selected={assignee} blank="Anyone" label="Assignee" />
 				<select name="team" aria-label="Team">
-					<option value="" selected={!myTeams && !team}>Any team</option>
-					<option value="mine" selected={myTeams}>My teams</option>
+					<option value="" selected={!team}>Any team</option>
 					{teamList.map((t) => <option value={String(t.id)} selected={team === t.id}>{t.name}</option>)}
 				</select>
 				<input type="search" name="q" value={q} placeholder="Search tasks" aria-label="Search tasks" />

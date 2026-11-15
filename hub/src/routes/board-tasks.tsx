@@ -38,13 +38,15 @@ function insertAssignments(db: D1Database, task: string, team: number, people: n
 	];
 }
 
-function TaskForm({ action, due, members, subteams, assignedPeople, assignedSubteams, task }: {
+export function TaskForm({ action, due, members, subteams, assignedPeople, assignedSubteams, task, returnToBoard }: {
 	action: string; due: string; members?: RosterMember[]; subteams?: Subteam[];
-	assignedPeople: Set<number>; assignedSubteams: Set<number>; task?: BoardTask;
+	assignedPeople: Set<number>; assignedSubteams: Set<number>; task?: BoardTask; returnToBoard?: boolean;
 }) {
 	return (
-		<form class="card stack" method="post" action={action}>
+		<form class="card stack" method="post" action={action} data-board-assignment={members ? 'required' : undefined}>
 			{task && <input type="hidden" name="version" value={task.version} />}
+			{!task && <input type="hidden" name="status" value="open" />}
+			{returnToBoard && <input type="hidden" name="return_to_board" value="1" />}
 			<Field label="Task"><input name="title" maxlength={200} required value={task?.title ?? ''} /></Field>
 			<Field label="Details"><textarea name="details" rows={4} maxlength={10000}>{task?.details ?? ''}</textarea></Field>
 			<Field label="Due date"><input type="date" name="due" required value={task?.due_date ?? due} /></Field>
@@ -61,7 +63,8 @@ function TaskForm({ action, due, members, subteams, assignedPeople, assignedSubt
 						<input type="checkbox" name="subteam" value={s.id} checked={assignedSubteams.has(s.id)} /> {s.name}
 					</label>)}</div>
 				</fieldset>}
-				<p class="hint">Leave both empty to let a team member claim it.</p>
+				<p class="hint">Assign at least one person or subteam. You can choose both.</p>
+				<p class="hint" data-assignment-error hidden role="alert">Choose at least one person or subteam.</p>
 			</>}
 			<div><button class="btn primary">{task ? 'Save task' : 'Create task'}</button></div>
 		</form>
@@ -93,18 +96,21 @@ boardTaskRoutes.post('/teams/:id/board', async (c) => {
 	const form = await readForm(c);
 	const path = `/teams/${team}/board/new`;
 	const { title, details, due } = fields(form);
+	const status = str(form.status) || 'open';
 	if (!title || !isDate(due)) return c.redirect(`${path}?error=${title ? 'date' : 'missing'}`);
+	if (!BOARD_STATUSES.some(([value]) => value === status)) return c.redirect(`${path}?error=selection`);
 	const manager = canAssignOnBoard(v, team);
 	const people = manager ? assignmentIds(form, 'person', (await teamRoster(db, team)).map((m) => m.id)) : [v.id];
 	const subteams = manager ? assignmentIds(form, 'subteam', (await teamSubteams(db, team)).filter((s) => !s.archived).map((s) => s.id)) : [];
 	if (!people || !subteams) return c.redirect(`${path}?error=selection`);
+	if (!people.length && !subteams.length) return c.redirect(`${path}?error=assignment`);
 	const task = crypto.randomUUID();
 	await db.batch([
-		db.prepare('INSERT INTO board_tasks (id, team_id, created_by, title, details, due_date) VALUES (?, ?, ?, ?, ?, ?)').bind(task, team, v.id, title, details, due),
+		db.prepare('INSERT INTO board_tasks (id, team_id, created_by, title, details, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(task, team, v.id, title, details, due, status),
 		...insertAssignments(db, task, team, people, subteams, ''),
 		boardLog(db, task, v.id, 'created')
 	]);
-	return c.redirect(`${boardTaskHref(task)}?ok=created`);
+	return c.redirect(str(form.return_to_board) === '1' ? `/teams/${team}?ok=created#board-task-${task}` : `${boardTaskHref(task)}?ok=created`);
 });
 
 boardTaskRoutes.get('/board-tasks/:id', async (c) => {
@@ -177,6 +183,7 @@ boardTaskRoutes.post('/board-tasks/:id/edit', async (c) => {
 		const people = assignmentIds(form, 'person', roster.map((m) => m.id));
 		const groups = assignmentIds(form, 'subteam', subteams.filter((s) => !s.archived).map((s) => s.id));
 		if (!people || !groups) return c.redirect(`${href}?error=selection`);
+		if (!people.length && !groups.length) return c.redirect(`${href}?error=assignment`);
 		writes.push(
 			db.prepare(`DELETE FROM board_task_people WHERE task_id = ?1 AND member_id IN (SELECT id FROM members WHERE active = 1)
 			 AND EXISTS (SELECT 1 FROM board_tasks WHERE id = ?1 AND change_token = ?2)`).bind(task.id, change),

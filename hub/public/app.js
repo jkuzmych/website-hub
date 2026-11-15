@@ -113,6 +113,30 @@ for (const button of document.querySelectorAll('[data-members-dialog]')) {
 	});
 }
 
+const newTeamTaskDialog = document.getElementById('new-team-task');
+if (newTeamTaskDialog instanceof HTMLDialogElement) {
+	const status = newTeamTaskDialog.querySelector('input[name="status"]');
+	document.querySelector('[data-members-dialog="new-team-task"]')?.addEventListener('click', () => { if (status) status.value = 'open'; });
+	for (const button of document.querySelectorAll('[data-board-add]')) {
+		button.addEventListener('click', () => {
+			if (status) status.value = button.dataset.boardAdd;
+			newTeamTaskDialog.showModal();
+			newTeamTaskDialog.addEventListener('close', () => button.focus(), { once: true });
+		});
+	}
+}
+
+for (const form of document.querySelectorAll('form[data-board-assignment]')) {
+	const error = form.querySelector('[data-assignment-error]');
+	form.addEventListener('change', () => { if (error) error.hidden = true; });
+	form.addEventListener('submit', (event) => {
+		if (form.querySelector('input[name="person"]:checked, input[name="subteam"]:checked')) return;
+		event.preventDefault();
+		if (error) error.hidden = false;
+		form.querySelector('input[name="person"], input[name="subteam"]')?.focus();
+	});
+}
+
 // Confirm destructive actions: <form data-confirm> or <button data-confirm>.
 document.addEventListener('submit', (e) => {
 	const form = e.target;

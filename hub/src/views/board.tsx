@@ -24,7 +24,7 @@ function SharedCard({ task: t, viewer, today, back, board = false }: { task: Boa
 	const claim = !t.is_assigned && viewer.teamIds.has(t.team_id) && t.status !== 'done' && t.status !== 'dropped';
 	const movable = isExec(viewer) || !!t.is_mine;
 	return (
-		<li class="card board-card" draggable={board && movable ? 'true' : undefined} data-board-draggable={board && movable ? '' : undefined}>
+		<li id={board ? `board-task-${t.id}` : undefined} class="card board-card" draggable={board && movable ? 'true' : undefined} data-board-draggable={board && movable ? '' : undefined}>
 			<a class="task-title" href={href}>{t.title}</a>
 			<span class="hint">{t.team_name} · {formatDate(t.due_date, today)}</span>
 			<span class="hint"><strong>Responsible:</strong> {t.responsible_people || (t.is_assigned ? 'No active members assigned' : 'Unassigned')}</span>
@@ -40,8 +40,8 @@ export function BoardTaskList({ tasks, viewer, today, back }: { tasks: BoardTask
 	return <ul class="board-list">{tasks.map((task) => <SharedCard task={task} viewer={viewer} today={today} back={back} />)}</ul>;
 }
 
-export function Kanban({ tasks, legacy, viewer, today, back }: {
-	tasks: BoardTask[]; legacy: TaskRow[]; viewer: Viewer; today: string; back: string;
+export function Kanban({ tasks, legacy, viewer, today, back, canCreate = false }: {
+	tasks: BoardTask[]; legacy: TaskRow[]; viewer: Viewer; today: string; back: string; canCreate?: boolean;
 }) {
 	return (
 		<div class="kanban" tabindex={0} role="region" aria-label="Task board">
@@ -50,7 +50,7 @@ export function Kanban({ tasks, legacy, viewer, today, back }: {
 				const rows = legacy.filter((t) => (t.status === 'open' && t.board_in_progress ? 'in_progress' : t.status) === status);
 				return (
 					<section class="kanban-column" data-board-stage={status}>
-						<h3 class="section-title">{label} <span class="count">{shared.length + rows.length}</span></h3>
+						<h3 class="section-title">{label} <span class="count">{shared.length + rows.length}</span>{canCreate && <button type="button" class="icon-btn board-add" aria-label={`Add task to ${label}`} title={`Add task to ${label}`} aria-haspopup="dialog" aria-controls="new-team-task" data-board-add={status}>+</button>}</h3>
 						{!shared.length && !rows.length && <Empty>No tasks.</Empty>}
 						<ul class="board-list">
 							{shared.map((task) => <SharedCard task={task} viewer={viewer} today={today} back={back} board />)}

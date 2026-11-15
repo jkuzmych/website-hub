@@ -114,6 +114,9 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match((await post('/teams/10/profile', 1, { discord: 'javascript:alert(1)' })).headers.get('location')!, /error=link/);
 		await post('/teams/10/profile', 1, { description: 'Main focus', github: 'https://github.example.test/product' });
 		assert.match(await html('/teams/10', 4), /Main focus.*github\.example\.test/s);
+		assert.match((await post('/teams/11/profile', 1, { cal: 'https://example.test/not-cal' })).headers.get('location')!, /error=cal/);
+		await post('/teams/11/profile', 1, { cal: 'https://cal.com/exec' });
+		assert.match(await html('/teams/11', 4), /Exec · <a href="\/people\/1">Exec<\/a> · <a href="https:\/\/cal\.com\/exec"/);
 		for (const name of ['Cloud', 'Research']) {
 			const created = await post('/teams/10/subteams', 1, { name });
 			assert.match(created.headers.get('location')!, /subteam=\d+/);
@@ -132,6 +135,10 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		const recipients = await db.prepare('SELECT member_id FROM board_task_recipients WHERE task_id = ? ORDER BY member_id').bind(taskId).all();
 		assert.deepEqual(recipients.results.map((r) => r.member_id), [2, 3, 5]);
 		const board = await html('/teams/10', 4);
+		const managerBoard = await html('/teams/10', 2);
+		assert.match(managerBoard, /data-members-dialog="new-team-task"/);
+		assert.match(managerBoard, /<dialog id="new-team-task"/);
+		assert.match(managerBoard, /data-board-add="in_progress"/);
 		assert.equal(board.match(/One shared card/g)?.length, 1);
 		assert.match(await html('/teams/10?subteam=1', 4), /One shared card/);
 		assert.match(await html('/teams/10?subteam=2', 4), /One shared card/);
@@ -154,10 +161,17 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		const personal = await post('/teams/10/board', 3, { title: 'My task', due, person: '5', subteam: '2' });
 		assert.match(await html(personal.headers.get('location')!, 4), /Assigned to<\/dt><dd>Ben<\/dd>/);
 		const unassigned = await post('/teams/10/board', 1, { title: 'Claim this card', due });
-		const claim = unassigned.headers.get('location')!.split('?')[0] + '/claim';
-		assert.equal((await post(claim, 4, {})).status, 404);
-		const claims = await Promise.all([post(claim, 2, {}), post(claim, 3, {})]);
-		assert.equal(claims.filter((res) => res.headers.get('location')?.includes('ok=assigned-self')).length, 1);
+		assert.match(unassigned.headers.get('location')!, /error=assignment/);
+		assert.match((await post(href + '/edit', 2, { title: 'Unassigned edit', due: date, version: '4' })).headers.get('location')!, /error=assignment/);
+		const subteamOnly = await post('/teams/10/board', 1, { title: 'Subteam task', due, subteam: '1' });
+		assert.match(subteamOnly.headers.get('location')!, /^\/board-tasks\//);
+		const staged = await post('/teams/10/board', 1, { title: 'Started task', due, person: '2', status: 'in_progress' });
+		assert.match(await html(staged.headers.get('location')!, 1), /<dt>Status<\/dt><dd>In progress<\/dd>/);
+		assert.match((await post('/teams/10/board', 1, { title: 'Invalid status', due, person: '2', status: 'invalid' })).headers.get('location')!, /error=selection/);
+		const fromBoard = await post('/teams/10/board', 1, { title: 'Back to board', due, person: '2', return_to_board: '1' });
+		const boardLocation = fromBoard.headers.get('location')!;
+		assert.match(boardLocation, /^\/teams\/10\?ok=created#board-task-/);
+		assert.ok((await html('/teams/10', 1)).includes(`id="${boardLocation.split('#')[1]}"`));
 		assert.match(await html('/tasks/50', 4), /Old action item/);
 		assert.doesNotMatch(await html('/tasks/50', 4), /Restricted meeting/);
 		assert.equal((await post('/tasks/50/board-move', 2, { status: 'done' })).status, 404);
@@ -184,6 +198,7 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		const prepContent = preparation.split('id="meeting-preparation"')[1].split('id="meeting-follow-up"')[0];
 		assert.match(prepContent, /Existing agenda/);
 		assert.match(prepContent, /Attachments/);
+		assert.match(prepContent, /Attendance/);
 		assert.doesNotMatch(prepContent, /Existing notes|id="actions"/);
 		const followUp = await html('/meetings/1?view=follow-up', 3);
 		assert.match(followUp, /id="follow-up-tab"[^>]*aria-selected="true"/);
@@ -191,7 +206,6 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		const followContent = followUp.split('id="meeting-follow-up"')[1];
 		assert.match(followContent, /Existing notes/);
 		assert.match(followContent, /id="actions"/);
-		assert.match(followContent, /Attendance/);
 		assert.match(await html('/meetings/3', 3), /id="follow-up-tab"[^>]*aria-selected="true"/);
 	});
 

@@ -81,7 +81,9 @@ export function MeetingAgenda({ m, viewer, content, zone }: Props) {
 							<button type="button" class="agenda-row" aria-haspopup="dialog" aria-controls={`agenda-item-${item.id}`}
 								data-members-dialog={`agenda-item-${item.id}`}>
 								<span class="agenda-row-main">
+									<span class="agenda-number" aria-hidden="true">{i + 1}.</span>
 									<strong class="agenda-item-title" title={item.title}>{item.title}</strong>
+									{item.body?.trim() && <span class="agenda-item-notes">{item.body}</span>}
 									{files.length > 0 && <span class="agenda-attachment" aria-label={`${files.length} attached ${files.length === 1 ? 'file' : 'files'}`} title={files.map((f) => f.name).join(', ')}>
 										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m21 11-8 8a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8-8" /></svg>
 										{files.length}

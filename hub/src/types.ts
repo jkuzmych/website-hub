@@ -36,6 +36,7 @@ export type Team = {
 	discord_url?: string;
 	drive_url?: string;
 	github_url?: string;
+	cal_url?: string;
 };
 
 export type TaskStatus = 'open' | 'done' | 'dropped';
