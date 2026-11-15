@@ -14,6 +14,11 @@ This describes the local website repository compared with clone baseline `39f1c6
 - Subteams have their own cards and pages, descriptions, rosters and filtered boards. Authorized editors can create and manage them and add team members.
 - Shared board cards can be assigned to people and subteams, with one shared status across the board and other task views. Members can claim eligible unassigned work; assignment and management remain role-sensitive. Task views and completion controls were also updated.
 
+## My work and agent context
+
+- My work brings assigned tasks and shared board cards together, links members to their teams, and lets them edit weekly availability. Task stages and completion controls are consistent with other task views.
+- The changes to Meetings, Teams, Subteams, and My work are crucial to the project. Future agents should consult [Hub project context](hub/PROJECT_CONTEXT.md) and its linked implementation and tests before changing these workflows.
+
 ## Other changes
 
 - Local demo seeding adds fictional members, teams, tasks and meetings for development. Hub migrations `0011` through `0019` add the supporting availability, meeting content, team board and related data structures; apply migrations in order for a new environment.

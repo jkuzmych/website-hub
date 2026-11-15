@@ -8,7 +8,7 @@ This directory is the active member management website. It is a TypeScript Cloud
 - `src/routes/`: page and form handlers; `home.tsx` is My work, `team-pages.tsx` handles teams and subteams, `board-tasks.tsx` handles team board tasks, and `meetings.tsx` / `meeting-content.tsx` handle meetings and agenda content.
 - `src/views/`: shared layouts, UI, and board components. `public/styles.css` and `public/app.js` contain shared styling and client behavior.
 - `src/db.ts`, `auth.ts`, `perm.ts`, `form.ts`, `dates.ts`, and `types.ts`: shared data access, authentication, authorization, validation, dates, and types. Reminder and email logic is in `reminders.ts`, `schedule.ts`, `emails.ts`, and `mail.ts`.
-- `migrations/`: ordered D1 schema migrations. Add a new migration for schema changes; do not rewrite applied migrations. The current latest is `0016_team_cal_url.sql`.
+- `migrations/`: ordered D1 schema migrations. Add a new migration for schema changes; do not rewrite applied migrations. The current latest is `0019_attachment_display_name.sql`.
 - `test/`: Node test runner unit and integration tests. The integration suite runs a local Worker and D1; `core-unit.test.ts` bundles some Worker modules in memory for Node.
 
 ## Local workflow
@@ -16,6 +16,17 @@ This directory is the active member management website. It is a TypeScript Cloud
 Run commands from this directory. Install dependencies with `npm install` if needed, then run `npm run db:migrate:local`, optionally `npm run db:seed:local`, and `npm run dev:local`. The local site is at http://localhost:8788. Demo accounts include `exec@example.test`, `lead@example.test`, and `member@example.test`; local sign-in displays the code and logs email instead of sending it. Local D1 state persists under `.wrangler/state/`. Seed data is fictional and must stay local.
 
 Run `npm test` and `npm run typecheck` as appropriate. Add meaningful unit tests for features needing unit-level coverage, and fix relevant failures. Tests include integration coverage, but coverage is not exhaustive. Check existing tests and behavior when changing a feature.
+
+## Crucial Hub changes
+
+The Meetings, Teams, Subteams, and My work changes are crucial to this project. Agents should review their implementation and preserve these connected workflows when making future changes. The root [change history](../read.md) compares the project with the original clone.
+
+- **Meetings:** The Agenda view has numbered items with durations, inline speaker notes and private attachments. Preparation and follow-up views, attributed summaries, meeting filters, check-in and existing attendance/form flows work within meeting access rules. Start with `src/routes/meetings.tsx` and `src/routes/meeting-content.tsx`.
+- **Teams:** Team pages combine descriptions, links, rosters, availability and shared task boards. Authorized editors manage settings and may delegate page administration. See `src/routes/team-pages.tsx` and `src/routes/board-tasks.tsx`.
+- **Subteams:** Each subteam has a card and page, description, roster and filtered board. Authorized editors can manage subteams and add eligible team members. Shared cards can target people, subteams or both, with a single status across views.
+- **My work:** The member dashboard brings together assigned work, including shared board cards, and links to the member's teams. Members can edit their weekly availability. See `src/routes/home.tsx`; maintain consistent task stages and completion behavior across task views.
+
+Preserve server-side permissions, validation, meeting privacy, and the shared task state across these pages. The local integration tests in `test/integration.test.ts` exercise key workflows, though coverage is not exhaustive.
 
 ## Product details
 
