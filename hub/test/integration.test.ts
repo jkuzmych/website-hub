@@ -82,6 +82,10 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 	};
 
 	await t.test('navigation, availability and team administration respect roles', async () => {
+		const notice = await html('/teams?ok=saved&error=missing', 1);
+		assert.match(notice, /data-system-notice[^>]*role="status"/);
+		assert.match(notice, /data-system-notice[^>]*role="alert"/);
+		assert.equal((notice.match(/data-dismiss-notice/g) ?? []).length, 2);
 		assert.equal((await request('/teams')).status, 302);
 		const login = await request('/login', undefined, new URLSearchParams({ email: 'cy@example.test' }));
 		const code = (await login.text()).match(/your code is <strong>(\d{6})/)?.[1];
@@ -93,6 +97,10 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match(sessionCookie, /^hub_session=/);
 		assert.doesNotMatch(sessionCookie, /;\s*Domain=/i);
 		const teams = await html('/teams', 4);
+		const myWork = await html('/', 2);
+		assert.match(myWork, /class="card team" id="team-10"/);
+		assert.match(myWork, /data-members-dialog="team-10-members"/);
+		assert.doesNotMatch(myWork, /data-members-dialog="team-10-add"/);
 		assert.match(teams, /href="\/teams\/10">Product/);
 		assert.match(teams, /href="\/teams\/11">Finance/);
 		assert.doesNotMatch(teams, />Exec Board</);
@@ -119,12 +127,27 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match(await html('/teams/11', 4), /Exec · <a href="\/people\/1">Exec<\/a> · <a href="https:\/\/cal\.com\/exec"/);
 		for (const name of ['Cloud', 'Research']) {
 			const created = await post('/teams/10/subteams', 1, { name });
-			assert.match(created.headers.get('location')!, /subteam=\d+/);
+			assert.match(created.headers.get('location')!, /\/subteams\/\d+/);
 		}
+		const cards = await html('/teams/10', 4);
+		assert.match(cards, /href="\/teams\/10\/subteams\/1">Cloud/);
+		assert.match(cards, /href="\/teams\/10\/subteams\/2">Research/);
+		assert.doesNotMatch(cards, /data-members-dialog="new-subteam"/);
+		assert.match(await html('/teams/10', 3), /data-members-dialog="new-subteam"/);
+		assert.equal((await post('/teams/10/subteams', 4, { name: 'Unauthorized' })).status, 404);
+		assert.match((await post('/teams/10/subteams', 1, { name: 'Cloud' })).headers.get('location')!, /error=exists/);
 		assert.match((await post('/teams/10/subteams/1', 1, [['name', 'Cloud'], ['member', '4']])).headers.get('location')!, /error=selection/);
 		await post('/teams/10/subteams/1', 1, [['name', 'Cloud'], ['description', 'Cloud focus'], ['member', '2'], ['member', '3']]);
 		await post('/teams/10/subteams/2', 1, [['name', 'Research'], ['member', '3'], ['member', '5']]);
-		assert.match(await html('/teams/10?subteam=1', 4), /Main focus.*Cloud focus/s);
+		assert.match(await html('/teams/10/subteams/1', 4), /Cloud focus/);
+		assert.match(await html('/teams/10', 1), /aria-label="Add member to Cloud"/);
+		assert.match(await html('/teams/10/subteams/1', 1), /aria-label="Add member to Cloud"/);
+		assert.doesNotMatch(await html('/teams/10', 4), /aria-label="Add member to Cloud"/);
+		assert.equal((await post('/teams/10/subteams/1/members', 4, { member: '5' })).status, 404);
+		assert.match((await post('/teams/10/subteams/1/members', 1, { member: '4' })).headers.get('location')!, /error=selection/);
+		assert.match((await post('/teams/10/subteams/1/members', 1, { member: '5', origin: 'team' })).headers.get('location')!, /^\/teams\/10\?ok=saved/);
+		assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM subteam_members WHERE subteam_id = 1 AND member_id = 5').first())?.n, 1);
+		assert.match((await post('/teams/10/subteams/1/members', 1, { member: '5' })).headers.get('location')!, /error=selection/);
 	});
 
 	await t.test('shared cards keep one status and a deduplicated recipient set', async () => {
@@ -140,8 +163,11 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match(managerBoard, /<dialog id="new-team-task"/);
 		assert.match(managerBoard, /data-board-add="in_progress"/);
 		assert.equal(board.match(/One shared card/g)?.length, 1);
-		assert.match(await html('/teams/10?subteam=1', 4), /One shared card/);
-		assert.match(await html('/teams/10?subteam=2', 4), /One shared card/);
+		assert.match(await html('/teams/10/subteams/1', 4), /One shared card/);
+		assert.match(await html('/teams/10/subteams/2', 4), /One shared card/);
+		assert.match(await html('/teams/10/subteams/1', 1), /id="subteam-settings-1"/);
+		assert.equal((await request('/teams/10/subteams/999', 4)).status, 404);
+		assert.equal((await request('/teams/10?subteam=1', 4)).headers.get('location'), '/teams/10/subteams/1');
 		assert.match(await html('/', 3), /One shared card/);
 		assert.match(await html('/tasks', 4), /One shared card/);
 		assert.match(await html('/people/3', 4), /One shared card/);
@@ -165,10 +191,16 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match((await post(href + '/edit', 2, { title: 'Unassigned edit', due: date, version: '4' })).headers.get('location')!, /error=assignment/);
 		const subteamOnly = await post('/teams/10/board', 1, { title: 'Subteam task', due, subteam: '1' });
 		assert.match(subteamOnly.headers.get('location')!, /^\/board-tasks\//);
+		await post('/teams/10/board', 1, { title: 'Research only', due, subteam: '2' });
+		assert.match(await html('/teams/10', 4), /Research only/);
+		assert.match(await html('/teams/10/subteams/2', 4), /Research only/);
+		assert.doesNotMatch(await html('/teams/10/subteams/1', 4), /Research only/);
 		const staged = await post('/teams/10/board', 1, { title: 'Started task', due, person: '2', status: 'in_progress' });
 		assert.match(await html(staged.headers.get('location')!, 1), /<dt>Status<\/dt><dd>In progress<\/dd>/);
 		assert.match((await post('/teams/10/board', 1, { title: 'Invalid status', due, person: '2', status: 'invalid' })).headers.get('location')!, /error=selection/);
 		const fromBoard = await post('/teams/10/board', 1, { title: 'Back to board', due, person: '2', return_to_board: '1' });
+		const fromSubteam = await post('/teams/10/board', 1, { title: 'Subteam return', due, subteam: '1', return_to_board: '1', return_path: '/teams/10/subteams/1' });
+		assert.match(fromSubteam.headers.get('location')!, /^\/teams\/10\/subteams\/1\?ok=created/);
 		const boardLocation = fromBoard.headers.get('location')!;
 		assert.match(boardLocation, /^\/teams\/10\?ok=created#board-task-/);
 		assert.ok((await html('/teams/10', 1)).includes(`id="${boardLocation.split('#')[1]}"`));
@@ -192,21 +224,30 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 	});
 
 	await t.test('meeting stage tabs group preparation and follow-up with explicit selection', async () => {
+		const noForm = await html('/meetings/2', 1);
+		assert.match(noForm, /id="meeting-form"[\s\S]*<form method="post" action="\/meetings\/2\/form"/);
+		assert.equal((await request('/meetings/2/form', 1)).headers.get('location'), '/meetings/2?view=form');
+		assert.doesNotMatch(noForm, /Feedback or anything else people fill out/);
 		const preparation = await html('/meetings/1?view=preparation', 3);
 		assert.match(preparation, /role="tablist" aria-label="Meeting stages"/);
 		assert.match(preparation, /id="preparation-tab"[^>]*aria-selected="true"/);
 		const prepContent = preparation.split('id="meeting-preparation"')[1].split('id="meeting-follow-up"')[0];
 		assert.match(prepContent, /Existing agenda/);
-		assert.match(prepContent, /Attachments/);
-		assert.match(prepContent, /Attendance/);
+		assert.doesNotMatch(prepContent, /id="files"|id="meeting-attendance"/);
 		assert.doesNotMatch(prepContent, /Existing notes|id="actions"/);
 		const followUp = await html('/meetings/1?view=follow-up', 3);
 		assert.match(followUp, /id="follow-up-tab"[^>]*aria-selected="true"/);
 		assert.match(followUp, /id="meeting-preparation"[^>]*hidden/);
-		const followContent = followUp.split('id="meeting-follow-up"')[1];
+		const followContent = followUp.split('id="meeting-follow-up"')[1].split('id="meeting-attendance-panel"')[0];
 		assert.match(followContent, /Existing notes/);
 		assert.match(followContent, /id="actions"/);
 		assert.match(await html('/meetings/3', 3), /id="follow-up-tab"[^>]*aria-selected="true"/);
+		const formView = await html('/meetings/1?view=form', 1);
+		assert.match(formView, /id="form-tab"[^>]*aria-selected="true"/);
+		assert.match(formView, /id="meeting-form"[^>]*role="tabpanel"[^>]*>.*Existing feedback/s);
+		assert.match(formView, /action="\/meetings\/1\/form"[^>]*class="card form-grid"/);
+		assert.match(await html('/meetings/1?view=attendance', 3), /id="attendance-tab"[^>]*aria-selected="true"/);
+		assert.match(await html('/meetings/1?view=library', 3), /id="library-tab"[^>]*aria-selected="true"/);
 	});
 
 	await t.test('agenda, speaker notes and private attachments preserve existing meeting records', async () => {
@@ -214,6 +255,7 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		for (const text of ['Existing agenda', 'Existing notes', 'Existing feedback']) assert.ok(existingMeeting.includes(text));
 		assert.match(await html('/f/synthetic-public-form'), /Existing feedback/);
 		assert.match((await post('/meetings/1/agenda', 3, { title: 'Demo', notes: 'Speaker notes content', duration_minutes: '2' })).headers.get('location')!, /ok=created/);
+		assert.equal((await post('/meetings/1/agenda/1/notes', 2, { notes: 'not mine', version: '1' })).status, 404);
 		assert.match(await html('/meetings/1', 2), /Demo.*Speaker notes content/s);
 		assert.equal((await post('/meetings/1/agenda/1/notes', 5, { notes: 'forged', version: '1' })).status, 404);
 		assert.match((await post('/meetings/3/agenda', 3, { title: 'Past' })).headers.get('location')!, /error=forbidden/);
@@ -229,6 +271,7 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match((await request('/meetings/1/files', 3, attachment)).headers.get('location')!, /ok=saved/);
 		const file = await db.prepare('SELECT id FROM meeting_attachments').first<{ id: string }>();
 		const href = `/meetings/1/files/${file!.id}`;
+		assert.equal((await post(href + '/remove', 2, {})).status, 404);
 		assert.equal((await request(href, 4)).status, 404);
 		assert.equal((await request(href)).status, 302);
 		assert.equal((await request('/meetings/2/files/' + file!.id, 1)).status, 404);
@@ -255,6 +298,9 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.equal((await db.prepare('SELECT duration_minutes FROM meeting_agenda WHERE id = ?').bind(item!.id).first())?.duration_minutes, 4);
 		const page = await html('/meetings/1', 3);
 		assert.match(page, /agenda-duration">~4 min/);
+		assert.match(page, /class="agenda-row agenda-static"[\s\S]*?Timed discussion/);
+		assert.match(page, /aria-label="Edit Timed discussion"/);
+		assert.doesNotMatch(await html('/meetings/1', 5), /aria-label="Edit Timed discussion"/);
 		assert.match(page, /name="duration_minutes"[^>]*required[^>]*value="2"/);
 	});
 
@@ -264,6 +310,7 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		form.set('duration_minutes', '7');
 		form.set('notes', 'Notes linked to the same agenda');
 		form.set('file', new File(['%PDF-1.4\nDemo document\n%%EOF'], 'slides.pdf', { type: 'application/pdf' }));
+		form.append('file', new File(['second document'], 'notes.txt', { type: 'text/plain' }));
 		assert.match((await request('/meetings/1/agenda', 3, form)).headers.get('location')!, /ok=created#agenda/);
 		const saved = await db.prepare(`SELECT f.id, f.agenda_id, f.original_agenda_id, a.title, a.duration_minutes, n.body
 		 FROM meeting_attachments f JOIN meeting_agenda a ON a.id = f.agenda_id
@@ -272,9 +319,59 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.ok(saved);
 		assert.equal(saved.title, 'Agenda with document');
 		assert.equal(saved.duration_minutes, 7);
-		assert.match(await html('/meetings/1', 3), /agenda-attachment.*agenda-duration">~7 min/s);
+		const agendaPage = await html('/meetings/1', 3);
+		assert.match(agendaPage, /<details class="agenda-expand"><summary class="agenda-row">[\s\S]*?Agenda with document[\s\S]*?agenda-duration">~7 min[\s\S]*?agenda-notes[\s\S]*?Notes linked to the same agenda/);
+		assert.match(agendaPage, /aria-label="Edit Agenda with document"/);
+		assert.match(agendaPage, /aria-label="Add agenda item"/);
+		assert.doesNotMatch(agendaPage, /data-members-dialog="agenda-item-/);
 		assert.equal(saved.body, 'Notes linked to the same agenda');
 		assert.equal(saved.agenda_id, saved.original_agenda_id);
+		assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM meeting_attachments WHERE agenda_id = ? AND removed = 0').bind(saved.agenda_id).first())?.n, 2);
+		const moreFiles = new FormData();
+		moreFiles.set('agenda', String(saved.agenda_id));
+		moreFiles.append('file', new File(['third'], 'third.txt', { type: 'text/plain' }));
+		moreFiles.append('file', new File(['fourth'], 'fourth.txt', { type: 'text/plain' }));
+		assert.match((await request('/meetings/1/files', 3, moreFiles)).headers.get('location')!, /ok=saved/);
+		const expanded = await html('/meetings/1', 3);
+		assert.match(expanded, /agenda-notes[\s\S]*?notes\.txt[\s\S]*?slides\.pdf/);
+		assert.match(expanded, /third\.txt/);
+		assert.match(expanded, /fourth\.txt/);
+		const direct = new FormData();
+		direct.set('file', new File(['library'], 'library.txt', { type: 'text/plain' }));
+		assert.match((await request('/meetings/1/files', 3, direct)).headers.get('location')!, /error=missing/);
+		direct.set('name', 'Project reference');
+		assert.match((await request('/meetings/1/files', 3, direct)).headers.get('location')!, /ok=saved/);
+		assert.match((await post('/meetings/1/library-links', 3, { name: 'Unsafe', url: 'javascript:alert(1)' })).headers.get('location')!, /error=library-link/);
+		assert.equal((await post('/meetings/1/library-links', 4, { name: 'Forbidden', url: 'https://example.com' })).status, 404);
+		assert.match((await post('/meetings/1/library-links', 3, { name: 'Reference', url: 'https://example.com/guide' })).headers.get('location')!, /ok=saved/);
+		const library = (await html('/meetings/1', 3)).match(/<section id="files"[^>]*>(.*?)<\/section>/s)?.[1] ?? '';
+		assert.match(library, /id="library-title"[^>]*>Library/);
+		assert.match(library, /data-members-dialog="add-library-file"/);
+		assert.match(library, /slides\.pdf/);
+		assert.match(library, /Project reference/);
+		assert.match(library, /PDF · Added by Ben · <time/);
+		assert.match(library, /Text file · Added by Ben · <time/);
+		assert.match(library, /data-library-type="Link" data-library-author="3"/);
+		assert.match(library, /href="https:\/\/example\.com\/guide" target="_blank" rel="noopener noreferrer">Reference/);
+		assert.match(library, /data-library-author-filter/);
+		assert.match(library, /data-library-type-filter/);
+		assert.match(library, /id="library-file-tab"/);
+		assert.match(library, /id="library-link-tab"/);
+		assert.match(library, /data-library-type="Text file"/);
+		const teamLibrary = await html('/teams/10?library_type=Link&library_person=3&library_creator=1&library_meeting=1&library_group=type', 3);
+		const teamLibrarySection = teamLibrary.split('id="team-library"')[1];
+		assert.match(teamLibrarySection, /<h3>Link<\/h3>/);
+		assert.match(teamLibrarySection, /Reference/);
+		assert.doesNotMatch(teamLibrarySection, /Project reference|slides\.pdf/);
+		assert.match(await html('/teams/10?library_group=creator', 3), /<h3>Exec<\/h3>/);
+		assert.match((await post('/meetings/2/library-links', 1, { name: 'Restricted library item', url: 'https://example.com/private' })).headers.get('location')!, /ok=saved/);
+		assert.doesNotMatch(await html('/teams/11', 4), /Restricted library item/);
+		assert.match(await html('/teams/11', 1), /Restricted library item/);
+		const link = await db.prepare("SELECT id FROM meeting_library_links WHERE name = 'Reference'").first<{ id: string }>();
+		assert.ok(link);
+		assert.equal((await post(`/meetings/1/library-links/${link.id}/remove`, 5, {})).status, 404);
+		assert.equal((await post(`/meetings/1/library-links/${link.id}/remove`, 3, {})).status, 302);
+		assert.equal((await db.prepare('SELECT removed FROM meeting_library_links WHERE id = ?').bind(link.id).first())?.removed, 1);
 		assert.equal(await (await request(`/meetings/1/files/${saved.id}`, 3)).text(), '%PDF-1.4\nDemo document\n%%EOF');
 		assert.equal((await request(`/meetings/1/files/${saved.id}`, 4)).status, 404);
 		form.set('title', 'Rejected attachment agenda');
@@ -297,14 +394,16 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 	});
 
 	await t.test('all meeting viewers can contribute and edit attributed summaries after the meeting', async () => {
-		assert.match((await post('/meetings/1/summary', 3, { body: 'Too early' })).headers.get('location')!, /error=forbidden/);
+		assert.match((await post('/meetings/1/summary', 3, { body: 'During the meeting' })).headers.get('location')!, /ok=created/);
+		await db.batch([db.prepare("INSERT INTO meetings (id, team_id, title, date, time, agenda, notes, created_by) VALUES (9, 10, 'Future meeting', '2099-01-01', '10:00', '', '', 1)"), db.prepare('INSERT INTO meeting_teams (meeting_id, team_id) VALUES (9, 10)')]);
+		assert.match((await post('/meetings/9/summary', 3, { body: 'Before the meeting' })).headers.get('location')!, /ok=created/);
 		assert.equal((await post('/meetings/3/summary', 4, { body: 'No access' })).status, 404);
 		assert.equal((await request('/meetings/3/summary', undefined, new URLSearchParams({ body: 'Anonymous' }))).status, 302);
 		for (const body of ['', '   ', 'x'.repeat(10001)]) {
 			assert.match((await post('/meetings/3/summary', 3, { body })).headers.get('location')!, /error=summary/);
 		}
 		assert.match(await html('/meetings/3', 3), /aria-label="Add to meeting summary"/);
-		assert.doesNotMatch(await html('/meetings/1', 3), /aria-label="Add to meeting summary"/);
+		assert.match(await html('/meetings/1', 3), /aria-label="Add to meeting summary"/);
 		assert.match((await post('/meetings/3/summary', 3, { body: 'We agreed on the demo scope.', author_name: 'Forged author' })).headers.get('location')!, /view=follow-up&ok=created#summary/);
 		const original = await db.prepare('SELECT * FROM meeting_summary_revisions WHERE meeting_id = 3').first<{ entry_id: string; version: number; body: string; author_name: string }>();
 		assert.ok(original);
@@ -315,7 +414,7 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.doesNotMatch(added, /Forged author/);
 		assert.match((await post(`/meetings/3/summary/${original.entry_id}`, 2, { body: 'Updated with next steps.', version: '1' })).headers.get('location')!, /ok=saved/);
 		assert.match((await post(`/meetings/3/summary/${original.entry_id}`, 3, { body: 'Stale overwrite', version: '1' })).headers.get('location')!, /error=stale/);
-		assert.match((await post(`/meetings/1/summary/${original.entry_id}`, 3, { body: 'Wrong meeting', version: '2' })).headers.get('location')!, /error=forbidden/);
+		assert.match((await post(`/meetings/1/summary/${original.entry_id}`, 3, { body: 'Wrong meeting', version: '2' })).headers.get('location')!, /error=stale/);
 		const updated = await html('/meetings/3', 3);
 		assert.match(updated, /Updated with next steps/);
 		assert.match(updated, /Added by Ben/);
@@ -325,6 +424,13 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 	});
 
 	await t.test('check-in preserves editor records and existing QR attendance', async () => {
+		const attendancePage = await html('/meetings/1?view=attendance', 1);
+		assert.match(attendancePage, /data-attendance-autosave/);
+		assert.match(attendancePage, /data-members-dialog="attendance-add-dialog"/);
+		assert.match(await html('/', 1), /id="my-teams-heading">My teams[^<]*<a[^>]*>Browse teams<\/a>/);
+		const home = await html('/', 2);
+		assert.match(home, /Due in the next 7 days[\s\S]*My teams[\s\S]*Upcoming meetings/);
+		assert.match(home, /Lead · <a href="\/people\/2">Ada<\/a>/);
 		assert.match((await post('/meetings/1/check-in', 2, { status: 'late', member: '3' })).headers.get('location')!, /error=forbidden/);
 		assert.equal((await post('/meetings/1/check-in', 4, { status: 'present' })).status, 404);
 		assert.match((await post('/meetings/1/check-in', 3, { status: 'late', member: '2' })).headers.get('location')!, /ok=attendance/);

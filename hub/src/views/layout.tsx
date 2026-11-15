@@ -37,6 +37,7 @@ const ERRORS: Record<string, string> = {
 	file: 'Choose a supported file up to 8 MiB.',
 	'file-space': 'The attachment storage limit has been reached.',
 	link: 'Use valid HTTPS links.',
+	'library-link': 'Enter a valid HTTP or HTTPS link.',
 	cal: 'Use an HTTPS link on cal.com.',
 	selection: 'Choose active people and subteams on this team.',
 	assignment: 'Choose at least one person or subteam.',
@@ -94,6 +95,14 @@ export function Document({ title, children }: { title: string; children: Child }
 	);
 }
 
+export function Notice({ children, error = false }: { children: Child; error?: boolean }) {
+	return <div class={`system-notice ${error ? 'err' : 'ok'}`} data-system-notice role={error ? 'alert' : 'status'}>
+		<span class="system-notice-icon" aria-hidden="true">{error ? '!' : '✓'}</span>
+		<div class="system-notice-text">{children}</div>
+		<button type="button" class="system-notice-close" aria-label="Dismiss notification" data-dismiss-notice>×</button>
+	</div>;
+}
+
 export function page(c: Context<AppEnv>, opts: { title: string; active?: NavKey }, body: Child) {
 	const viewer = c.get('viewer');
 	const ok = FLASH[c.req.query('ok') ?? ''];
@@ -122,16 +131,7 @@ export function page(c: Context<AppEnv>, opts: { title: string; active?: NavKey 
 						</div>
 					</header>
 					<main class="shell main">
-						{ok && (
-							<p class="flash ok" role="status">
-								{ok}
-							</p>
-						)}
-						{err && (
-							<p class="flash err" role="alert">
-								{err}
-							</p>
-						)}
+						{(ok || err) && <div class="system-notices">{ok && <Notice>{ok}</Notice>}{err && <Notice error>{err}</Notice>}</div>}
 						{body}
 					</main>
 				</Document>

@@ -1,13 +1,14 @@
 import { Hono } from 'hono';
 import { boardTasks } from '../board';
 import { addDays, formatDate, formatTimeRange, todayIn } from '../dates';
-import { all, first, groupStats, MEETING_SELECT, MEETING_VISIBLE, run, TASK_SELECT, teamNames, visible } from '../db';
+import { activeMembers, all, first, groupStats, MEETING_SELECT, MEETING_VISIBLE, run, TASK_SELECT, teamNames, visible } from '../db';
 import { readForm, str } from '../form';
 import { canAssign, isExec } from '../perm';
-import type { AppEnv, MeetingRow, TaskRow } from '../types';
+import type { AppEnv, MeetingRow, TaskRow, Team } from '../types';
 import { page } from '../views/layout';
 import { BoardTaskList } from '../views/board';
 import { collapseTasks, Empty, Field, PageHead, TaskList } from '../views/ui';
+import { TeamCard, type TeamMemberRow } from './people';
 
 export const homeRoutes = new Hono<AppEnv>();
 
@@ -53,7 +54,7 @@ homeRoutes.get('/', async (c) => {
 	const today = todayIn(c.env.TIMEZONE);
 	const weekOut = addDays(today, 7);
 
-	const [mine, recentDone, assignedByMe, upcoming, recent, clubOverdue, shared, myTeams] = await Promise.all([
+	const [mine, recentDone, assignedByMe, upcoming, recent, clubOverdue, shared, myTeams, teamMembers, activePeople] = await Promise.all([
 		all<TaskRow>(db, `${TASK_SELECT} WHERE t.assignee_id = ? AND t.status = 'open' ORDER BY t.due_date, t.id`, v.id),
 		all<TaskRow>(db, `${TASK_SELECT} WHERE t.assignee_id = ? AND t.status = 'done' ORDER BY t.completed_at DESC LIMIT 5`, v.id),
 		canAssign(v)
@@ -71,7 +72,10 @@ homeRoutes.get('/', async (c) => {
 		all<MeetingRow>(db, `${MEETING_SELECT} WHERE ${visible(v, MEETING_VISIBLE)} AND m.date < ?2 ORDER BY m.date DESC, m.time DESC LIMIT 5`, v.id, today),
 		isExec(v) ? first<{ n: number; people: number }>(db, "SELECT COUNT(*) AS n, COUNT(DISTINCT assignee_id) AS people FROM tasks WHERE status = 'open' AND due_date < ?", today) : Promise.resolve(null),
 		boardTasks(db, v.id, { assignee: v.id, status: 'open' }),
-		all<{ id: number; name: string }>(db, 'SELECT t.id, t.name FROM teams t JOIN team_members tm ON tm.team_id = t.id WHERE tm.member_id = ? AND t.archived = 0 ORDER BY t.name COLLATE NOCASE', v.id)
+		all<Team>(db, 'SELECT t.* FROM teams t JOIN team_members tm ON tm.team_id = t.id WHERE tm.member_id = ? AND t.archived = 0 ORDER BY t.name COLLATE NOCASE', v.id),
+		all<TeamMemberRow>(db, `SELECT x.team_id, x.member_id, x.is_lead, m.name, m.role FROM team_members x JOIN members m ON m.id = x.member_id
+		 WHERE m.active = 1 AND x.team_id IN (SELECT team_id FROM team_members WHERE member_id = ?) ORDER BY x.is_lead DESC, m.name COLLATE NOCASE`, v.id),
+		isExec(v) ? activeMembers(db) : Promise.resolve([])
 	]);
 
 	const groups = await groupStats(db, assignedByMe);
@@ -93,7 +97,7 @@ homeRoutes.get('/', async (c) => {
 					<button type="button" class="icon-btn" aria-label="Edit available hours" title="Edit available hours" aria-haspopup="dialog" aria-controls="edit-availability" data-members-dialog="edit-availability">
 						<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
 					</button></span></span>}
-				sub={openCount ? `You have ${openCount} open task${openCount === 1 ? '' : 's'}${overdueCount ? `, ${overdueCount} overdue` : ''}.` : "You're all caught up."}
+				sub={openCount ? `You have ${openCount} open task${openCount === 1 ? '' : 's'}${overdueCount ? `, ${overdueCount} overdue` : ''}.` : undefined}
 				actions={
 					<><a class="btn" href={'/tasks?status=open&team=mine'}>Pick a task</a><a class="btn primary" href="/tasks/new">
 						New task
@@ -109,21 +113,21 @@ homeRoutes.get('/', async (c) => {
 					</form>
 				</div>
 			</dialog>
-			{clubOverdue && clubOverdue.n > 0 && (
-				<p class="callout">
-					Across the club, <b>{clubOverdue.n}</b> task{clubOverdue.n === 1 ? ' is' : 's are'} overdue among <b>{clubOverdue.people}</b> {clubOverdue.people === 1 ? 'person' : 'people'}. <a href="/people">See who</a>
-				</p>
-			)}
-			<section class="my-teams" aria-labelledby="my-teams-heading">
-				<h2 class="section-title" id="my-teams-heading">My teams</h2>
+			{clubOverdue && clubOverdue.n > 0 && <p class="home-club-overdue"><a href="/people">Club overdue tasks <span class="count">{clubOverdue.n}</span></a></p>}
+			<div class="home-dashboard">
+				<section class="home-due" aria-label="Upcoming deadlines">
+					<h2 class="section-title">
+						Due in the next 7 days {thisWeek.length > 0 && <span class="count">{thisWeek.length}</span>}
+					</h2>
+					<TaskList tasks={thisWeek} today={today} viewer={v} show={['team', 'meeting']} back="/" empty="Nothing due in the next 7 days" />
+				</section>
+			<section class="my-teams home-teams" aria-labelledby="my-teams-heading">
+				<h2 class="section-title" id="my-teams-heading">My teams <a class="btn small" href="/teams">Browse teams</a></h2>
 				<div class="my-teams-links">
-					{myTeams.length ? <nav class="seg" aria-label="My teams">{myTeams.map((team) => <a href={`/teams/${team.id}`}>{team.name}</a>)}</nav> : <Empty>You are not on a team yet.</Empty>}
-					<a class="btn small" href="/teams">+ Add team</a>
+					{myTeams.length ? <div class="teams">{myTeams.map((team) => <TeamCard team={team} links={teamMembers} people={activePeople} editable={isExec(v)} showLead />)}</div> : <Empty>You are not on a team yet.</Empty>}
 				</div>
 			</section>
-
-			<div class="grid-2">
-				<section>
+				<section class="home-other" aria-label="Other tasks">
 					{shared.length > 0 && <>
 						<h2 class="section-title">Team board tasks</h2>
 						<BoardTaskList tasks={shared} viewer={v} today={today} back="/" />
@@ -136,10 +140,6 @@ homeRoutes.get('/', async (c) => {
 							<TaskList tasks={overdue} today={today} viewer={v} show={['team', 'meeting']} back="/" />
 						</>
 					)}
-					<h2 class="section-title">
-						Due in the next 7 days {thisWeek.length > 0 && <span class="count">{thisWeek.length}</span>}
-					</h2>
-					<TaskList tasks={thisWeek} today={today} viewer={v} show={['team', 'meeting']} back="/" empty="Nothing due this week." />
 					{later.length > 0 && (
 						<>
 							<h2 class="section-title">
@@ -163,11 +163,11 @@ homeRoutes.get('/', async (c) => {
 						</>
 					)}
 				</section>
-				<aside>
-					<h2 class="section-title">Coming up</h2>
+				<aside class="home-meetings">
+					<h2 class="section-title">Upcoming meetings</h2>
 					<MeetingList meetings={upcoming} today={today} />
-					<h2 class="section-title">Recent meetings</h2>
-					<MeetingList meetings={recent} today={today} />
+					<h2 class="section-title home-recent-heading">Recent meetings</h2>
+					<div class="home-recent"><MeetingList meetings={recent} today={today} /></div>
 				</aside>
 			</div>
 		</>

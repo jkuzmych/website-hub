@@ -314,29 +314,23 @@ peopleRoutes.post('/people/:id', async (c) => {
 
 // ---------- teams (execs) ----------
 
-type TeamMemberRow = { team_id: number; member_id: number; is_lead: number; name: string; role: Role };
+export type TeamMemberRow = { team_id: number; member_id: number; is_lead: number; name: string; role: Role };
 
-peopleRoutes.get('/teams', async (c) => {
-	const v = c.get('viewer');
-	const editable = isExec(v);
-	const [teamList, links, people] = await Promise.all([
-		teams(c.env.DB, true),
-		all<TeamMemberRow>(c.env.DB, 'SELECT x.team_id, x.member_id, x.is_lead, m.name, m.role FROM team_members x JOIN members m ON m.id = x.member_id WHERE m.active = 1 ORDER BY x.is_lead DESC, m.name COLLATE NOCASE'),
-		editable ? activeMembers(c.env.DB) : Promise.resolve([])
-	]);
-	const card = (t: Team) => {
+export function TeamCard({ team: t, links, people, editable, showLead = false }: { team: Team; links: TeamMemberRow[]; people: Member[]; editable: boolean; showLead?: boolean }) {
 		const members = links.filter((l) => l.team_id === t.id);
 		const execs = members.filter((m) => m.role === 'exec');
+		const leads = members.filter((m) => m.is_lead);
+		const leaders = showLead ? leads : execs;
 		const others = people.filter((p) => !members.some((m) => m.member_id === p.id));
 		return (
 			<section class={`card team${t.archived ? ' inactive' : ''}`} id={`team-${t.id}`}>
 				<header class="team-head">
 					<div>
-						<h2><a href={`/teams/${t.id}`}>{t.name}</a></h2>
+						<h2><a class="team-card-link" href={`/teams/${t.id}`}>{t.name}</a></h2>
 						<p>
-							{execs.length ? <>{execs.length === 1 ? 'Exec' : 'Execs'}{' · '}
-								{execs.map((exec, index) => <>{index > 0 && ', '}<a href={`/people/${exec.member_id}`}>{exec.name}</a></>)}
-							</> : 'No exec assigned'}
+							{leaders.length ? <>{showLead ? (leaders.length === 1 ? 'Lead' : 'Leads') : (leaders.length === 1 ? 'Exec' : 'Execs')}{' · '}
+								{leaders.map((leader, index) => <>{index > 0 && ', '}<a href={`/people/${leader.member_id}`}>{leader.name}</a></>)}
+							</> : showLead ? 'No lead assigned' : 'No exec assigned'}
 						</p>
 					</div>
 
@@ -350,8 +344,8 @@ peopleRoutes.get('/teams', async (c) => {
 								{m.role === 'exec' && <span class="tag exec">Exec</span>}
 								{t.kind !== 'exec' && !!m.is_lead && <span class="tag lead">Lead</span>}
 								{editable && <Menu label={`Options for ${m.name}`}>
-									{t.kind !== 'exec' && <PostButton action={`/teams/${t.id}/members/${m.member_id}/lead`} label={m.is_lead ? 'Remove as lead' : 'Make lead'} cls="item" />}
-									<PostButton action={`/teams/${t.id}/members/${m.member_id}/remove`} label={`Remove from ${t.name}`} cls="item danger" />
+									{t.kind !== 'exec' && <PostButton action={`/teams/${t.id}/members/${m.member_id}/lead`} label={m.is_lead ? 'Remove as lead' : 'Make lead'} removeLabel={m.is_lead ? `Remove ${m.name} as lead` : undefined} cls="item" />}
+									<PostButton action={`/teams/${t.id}/members/${m.member_id}/remove`} label={`Remove from ${t.name}`} removeLabel={`Remove ${m.name} from ${t.name}`} />
 								</Menu>}
 							</li>
 						))}
@@ -405,7 +399,17 @@ peopleRoutes.get('/teams', async (c) => {
 				</dialog>}
 			</section>
 		);
-	};
+}
+
+peopleRoutes.get('/teams', async (c) => {
+	const v = c.get('viewer');
+	const editable = isExec(v);
+	const [teamList, links, people] = await Promise.all([
+		teams(c.env.DB, true),
+		all<TeamMemberRow>(c.env.DB, 'SELECT x.team_id, x.member_id, x.is_lead, m.name, m.role FROM team_members x JOIN members m ON m.id = x.member_id WHERE m.active = 1 ORDER BY x.is_lead DESC, m.name COLLATE NOCASE'),
+		editable ? activeMembers(c.env.DB) : Promise.resolve([])
+	]);
+
 	// Keep the leadership team available to existing meeting and task references.
 	const listedTeams = teamList.filter((team) => team.kind !== 'exec' || team.name.toLowerCase() !== 'exec board');
 	const archived = listedTeams.filter((t) => t.archived);
@@ -430,11 +434,11 @@ peopleRoutes.get('/teams', async (c) => {
 					</form>
 				</div>
 			</dialog>}
-			<div class="teams">{listedTeams.filter((t) => !t.archived).map(card)}</div>
+			<div class="teams">{listedTeams.filter((t) => !t.archived).map((team) => <TeamCard team={team} links={links} people={people} editable={editable} />)}</div>
 			{archived.length > 0 && (
 				<details class="archived-teams">
 					<summary>Archived teams ({archived.length})</summary>
-					<div class="teams">{archived.map(card)}</div>
+					<div class="teams">{archived.map((team) => <TeamCard team={team} links={links} people={people} editable={editable} />)}</div>
 				</details>
 			)}
 		</>

@@ -44,6 +44,7 @@ export function boardTasks(db: D1Database, viewer: number, options: {
 	team?: number | null;
 	teamIds?: number[];
 	subteam?: number | null;
+	subteams?: number[];
 	assignee?: number | null;
 	status?: string;
 	q?: string;
@@ -55,6 +56,7 @@ export function boardTasks(db: D1Database, viewer: number, options: {
 	if (options.team) where.push(`b.team_id = ${bind(options.team)}`);
 	if (options.teamIds) where.push(`b.team_id IN (SELECT value FROM json_each(${bind(JSON.stringify(options.teamIds))}))`);
 	if (options.subteam) where.push(`EXISTS (SELECT 1 FROM board_task_subteams x WHERE x.task_id = b.id AND x.subteam_id = ${bind(options.subteam)})`);
+	if (options.subteams?.length) where.push(`EXISTS (SELECT 1 FROM board_task_subteams x WHERE x.task_id = b.id AND x.subteam_id IN (SELECT value FROM json_each(${bind(JSON.stringify(options.subteams))})))`);
 	if (options.assignee) where.push(`EXISTS (SELECT 1 FROM board_task_recipients r WHERE r.task_id = b.id AND r.member_id = ${bind(options.assignee)})`);
 	if (options.status === 'open' || options.status === 'overdue') where.push("b.status IN ('open', 'in_progress')");
 	if (options.status === 'overdue' && options.today) where.push(`b.due_date < ${bind(options.today)}`);

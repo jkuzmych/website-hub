@@ -682,7 +682,10 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 	const defaultDue = addDays(m.date > today ? m.date : today, 7);
 	const joint = m.kind === 'meeting' && meetingTeams(m).length > 1;
 	const timing = meetingTiming(m, c.env.TIMEZONE);
-	const followUp = c.req.query('view') === 'follow-up' || (c.req.query('view') !== 'preparation' && timing.ended);
+	const view = c.req.query('view');
+	const selectedView = ['preparation', 'follow-up', 'form', 'attendance', 'library'].includes(view ?? '') ? view : timing.ended ? 'follow-up' : 'preparation';
+	const formView = selectedView === 'form';
+	const followUp = selectedView === 'follow-up';
 	const myAttendance = roster.find((r) => r.id === v.id);
 	const canCheckIn = timing.started && !timing.ended && (m.kind === 'event' || !!myAttendance)
 		&& (!myAttendance?.status || myAttendance.self_report === 1);
@@ -720,15 +723,15 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 
 			<div data-meeting-tabs>
 				<nav class="seg meeting-tabs" role="tablist" aria-label="Meeting stages">
-					<a id="preparation-tab" role="tab" aria-controls="meeting-preparation" aria-selected={!followUp} tabindex={followUp ? -1 : 0} href={`/meetings/${m.id}?view=preparation`}>Agenda</a>
+					<a id="preparation-tab" role="tab" aria-controls="meeting-preparation" aria-selected={selectedView === 'preparation'} tabindex={selectedView === 'preparation' ? 0 : -1} href={`/meetings/${m.id}?view=preparation`}>Agenda</a>
 					<a id="follow-up-tab" role="tab" aria-controls="meeting-follow-up" aria-selected={followUp} tabindex={followUp ? 0 : -1} href={`/meetings/${m.id}?view=follow-up`}>Summary</a>
+					<a id="form-tab" role="tab" aria-controls="meeting-form" aria-selected={formView} tabindex={formView ? 0 : -1} href={`/meetings/${m.id}?view=form`}>Form</a>
+					<a id="attendance-tab" role="tab" aria-controls="meeting-attendance-panel" aria-selected={selectedView === 'attendance'} tabindex={selectedView === 'attendance' ? 0 : -1} href={`/meetings/${m.id}?view=attendance`}>Attendance</a>
+					<a id="library-tab" role="tab" aria-controls="meeting-library-panel" aria-selected={selectedView === 'library'} tabindex={selectedView === 'library' ? 0 : -1} href={`/meetings/${m.id}?view=library`}>Library</a>
 				</nav>
-				<div id="meeting-preparation" class="meeting-tab-panel grid-2 wide-left" role="tabpanel" aria-labelledby="preparation-tab" hidden={followUp}>
+				<div id="meeting-preparation" class="meeting-tab-panel grid-2 wide-left" role="tabpanel" aria-labelledby="preparation-tab" hidden={selectedView !== 'preparation'}>
 					<section>
 						<MeetingAgenda m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
-						<h2 class="section-title">Attachments</h2>
-						<MeetingFiles m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
-						<FormSection m={m} f={form} editable={editable} appUrl={c.env.APP_URL} />
 					</section>
 					<aside>
 					{toRemind.length > 0 && (reminded || remindLater) && (
@@ -741,70 +744,6 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 							</a>
 						</p>
 					)}
-					<FormSection m={m} f={form} editable={editable} appUrl={c.env.APP_URL} />
-					{canCheckIn && (
-						<form method="post" action={`/meetings/${m.id}/check-in`} class="card stack">
-							<strong>Your attendance</strong>
-							<Choice name="status" label="Check in" selected={myAttendance?.status ?? 'present'} options={[[ 'present', 'Here' ], [ 'late', 'Partial' ]]} />
-							<div><button class="btn small primary">Save check-in</button></div>
-						</form>
-					)}
-					{m.kind === 'event' ? (
-						<WhoCame m={m} came={marked} people={editable ? people : null} />
-					) : (
-						<>
-							<h2 class="section-title">
-								Attendance <span class="muted">{marked.length ? `${present}/${marked.length} present` : ''}</span>
-							</h2>
-							{editable ? (
-								<form method="post" action={`/meetings/${m.id}/attendance`} class="card attendance">
-									{roster.length ? (
-										<>
-											<div class="att-tools">
-												<button type="button" class="link-btn" data-all-present>
-													Mark everyone present
-												</button>
-											</div>
-											{roster.map((r) => (
-												<div class="att-row" role="radiogroup" aria-label={r.name}>
-													<span>{r.name}</span>
-													<div class="seg">
-														{STATUSES.map(([value, label]) => (
-															<label>
-																<input type="radio" name={`att_${r.id}`} value={value} checked={r.status === value} />
-																<span>{label}</span>
-															</label>
-														))}
-													</div>
-												</div>
-											))}
-										</>
-									) : (
-										<Empty>No one is on this team yet. Add people below, or add team members on the Teams page.</Empty>
-									)}
-									{others.length > 0 && (
-										<label class="field">
-											<span class="label">Someone else came</span>
-											<MemberSelect name="add" members={others} blank="Add a person (marked present)" />
-										</label>
-									)}
-									<button class="btn primary">Save attendance</button>
-								</form>
-							) : marked.length ? (
-								<ul class="att-list">
-									{marked.map((r) => (
-										<li>
-											<span>{r.name}</span>
-											<span class={`pill att-${r.status}`}>{attendanceLabel(r.status!, r.self_report)}</span>
-										</li>
-									))}
-								</ul>
-							) : (
-								<Empty>Attendance not taken.</Empty>
-							)}
-						</>
-					)}
-					<AttendanceHistory roster={roster} {...attendance} zone={c.env.TIMEZONE} />
 					</aside>
 				</div>
 				<div id="meeting-follow-up" class="meeting-tab-panel grid-2 wide-left" role="tabpanel" aria-labelledby="follow-up-tab" hidden={!followUp}>
@@ -839,6 +778,69 @@ meetingRoutes.get('/meetings/:id', async (c) => {
 
 					</aside>
 				</div>
+				<div id="meeting-attendance-panel" class="meeting-tab-panel" role="tabpanel" aria-labelledby="attendance-tab" hidden={selectedView !== 'attendance'}>
+					{canCheckIn && (
+						<form method="post" action={`/meetings/${m.id}/check-in`} class="card stack" data-attendance-autosave>
+							<strong>Your attendance</strong>
+							<Choice name="status" label="Check in" selected={myAttendance?.status ?? 'present'} options={[[ 'present', 'Here' ], [ 'late', 'Partial' ]]} />
+							<noscript><div><button class="btn small primary">Save check-in</button></div></noscript>
+						</form>
+					)}
+						<>
+							<h2 class="section-title attendance-heading">
+								Attendance <span class="muted">{marked.length ? `${present}/${marked.length} present` : ''}</span>
+								{editable && roster.length > 0 && <button type="button" class="link-btn" form="meeting-attendance" data-all-present>Mark everyone present</button>}
+							</h2>
+							{editable ? (
+								<form id="meeting-attendance" method="post" action={`/meetings/${m.id}/attendance`} class="card attendance" data-attendance-autosave>
+									{roster.length ? (
+										<>
+											{roster.map((r) => (
+												<div class="att-row" role="radiogroup" aria-label={r.name}>
+													<span>{r.name}</span>
+													<div class="seg">
+														{STATUSES.map(([value, label]) => (
+															<label>
+																<input type="radio" name={`att_${r.id}`} value={value} checked={r.status === value} />
+																<span>{label}</span>
+															</label>
+														))}
+													</div>
+												</div>
+											))}
+										</>
+									) : (
+										<Empty>No one is on this team yet. Add people below, or add team members on the Teams page.</Empty>
+									)}
+									<p class="hint" data-attendance-status role="status" aria-live="polite"></p>
+									<noscript><button class="btn primary">Save attendance</button></noscript>
+								</form>
+							) : marked.length ? (
+								<ul class="att-list">
+									{marked.map((r) => (
+										<li>
+											<span>{r.name}</span>
+											<span class={`pill att-${r.status}`}>{attendanceLabel(r.status!, r.self_report)}</span>
+										</li>
+									))}
+								</ul>
+							) : (
+								<Empty>Attendance not taken.</Empty>
+							)}
+							{editable && <div class="attendance-add"><button type="button" class="icon-btn agenda-add-button" aria-label="Add someone to attendance" title="Add someone to attendance" aria-haspopup="dialog" aria-controls="attendance-add-dialog" data-members-dialog="attendance-add-dialog">+</button></div>}
+							{editable && <dialog id="attendance-add-dialog" class="members-dialog" aria-labelledby="attendance-add-title"><div class="members-dialog-content stack">
+								<header><h2 id="attendance-add-title">Add someone</h2><form method="dialog"><button class="icon-btn" aria-label="Close">?</button></form></header>
+								{others.length ? <form method="post" action={`/meetings/${m.id}/attendance`} class="stack"><Field label="Person"><MemberSelect name="add" members={others} blank="Choose a person" required /></Field><div><button class="btn primary">Add</button></div></form> : <p class="hint">Everyone is already listed.</p>}
+							</div></dialog>}
+						</>
+					<AttendanceHistory roster={roster} {...attendance} zone={c.env.TIMEZONE} />
+				</div>
+				<div id="meeting-library-panel" class="meeting-tab-panel" role="tabpanel" aria-labelledby="library-tab" hidden={selectedView !== 'library'}>
+					<MeetingFiles m={m} viewer={v} content={content} zone={c.env.TIMEZONE} />
+				</div>
+				<div id="meeting-form" class="meeting-tab-panel" role="tabpanel" aria-labelledby="form-tab" hidden={!formView}>
+					{!form && !editable ? <p class="hint">No form yet.</p> : <FormSection m={m} f={form} editable={editable} appUrl={c.env.APP_URL} />}
+				</div>
 			</div>
 		</>
 	);
@@ -858,7 +860,7 @@ meetingRoutes.post('/meetings/:id/check-in', async (c) => {
 	 AND (?2 = 'event' OR ${MEETING_EXPECTED})
 	 ON CONFLICT(meeting_id, member_id) DO UPDATE SET status = excluded.status
 	 WHERE attendance.self_report = 1`, m.id, m.kind, v.id, status);
-	return c.redirect(`${path}?view=follow-up&${result.meta.changes ? 'ok=attendance' : 'error=forbidden'}`);
+	return c.redirect(`${path}?view=attendance&${result.meta.changes ? 'ok=attendance' : 'error=forbidden'}`);
 });
 
 meetingRoutes.post('/meetings/:id/attendance', async (c) => {
@@ -866,16 +868,7 @@ meetingRoutes.post('/meetings/:id/attendance', async (c) => {
 	const m = await loadMeeting(c, v, c.req.param('id'));
 	if (!m || !canEditMeeting(v, m)) return c.notFound();
 	const form = await readForm(c);
-	if (m.kind === 'event') {
-		const came = list(form.came).map(Number).filter((n) => Number.isInteger(n) && n > 0);
-		const db = c.env.DB;
-		await db.batch([
-			// The checklist only lists active members; leave anyone else's record alone.
-			db.prepare('DELETE FROM attendance WHERE meeting_id = ? AND member_id IN (SELECT id FROM members WHERE active = 1)').bind(m.id),
-			...came.map((memberId) => db.prepare("INSERT OR REPLACE INTO attendance (meeting_id, member_id, status) VALUES (?, ?, 'present')").bind(m.id, memberId))
-		]);
-		return c.redirect(`/meetings/${m.id}?view=follow-up&ok=attendance`);
-	}
+
 	const valid = new Set(STATUSES.map(([s]) => s));
 	const stmts: D1PreparedStatement[] = [];
 	const upsert = (memberId: number, status: string) =>
@@ -888,7 +881,7 @@ meetingRoutes.post('/meetings/:id/attendance', async (c) => {
 	const added = id(form.add);
 	if (added) stmts.push(upsert(added, 'present'));
 	if (stmts.length) await c.env.DB.batch(stmts);
-	return c.redirect(`/meetings/${m.id}?view=follow-up&ok=attendance`);
+	return c.redirect(`/meetings/${m.id}?view=attendance&ok=attendance`);
 });
 
 meetingRoutes.post('/meetings/:id/actions', async (c) => {

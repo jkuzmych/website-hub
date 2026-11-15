@@ -10,6 +10,33 @@ async function load(path: string): Promise<any> {
 	return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString('base64')}`);
 }
 
+test('subteam cards link to their pages and respect archived visibility', async () => {
+	const { SubteamCards } = await load('src/routes/team-pages.tsx');
+	const subteams = [
+		{ id: 12, team_id: 7, name: 'Design & Research', description: '', archived: 0 },
+		{ id: 19, team_id: 7, name: 'Old group', description: '', archived: 1 }
+	];
+	const viewer = String(SubteamCards({ root: '/teams/7', subteams, members: [], subRoster: [], editable: false }));
+	assert.match(viewer, /href="\/teams\/7\/subteams\/12"/);
+	assert.match(viewer, /Design &amp; Research/);
+	assert.doesNotMatch(viewer, /Old group|Add subteam/);
+	const admin = String(SubteamCards({ root: '/teams/7', subteams, members: [], subRoster: [], editable: true }));
+	assert.match(admin, /Old group/);
+	assert.match(admin, /action="\/teams\/7\/subteams"/);
+	assert.match(admin, /data-members-dialog="new-subteam"/);
+});
+
+test('team subteam lookup binds the requested team ID', async () => {
+	const { teamSubteams } = await load('src/routes/team-pages.tsx');
+	let bound: unknown;
+	let query = '';
+	const rows = [{ id: 31, team_id: 7, name: 'New group' }];
+	const db = { prepare(sql: string) { query = sql; return { bind(value: unknown) { bound = value; return { all: async () => ({ results: rows }) }; } }; } };
+	assert.deepEqual(await teamSubteams(db, 7), rows);
+	assert.match(query, /WHERE team_id = \?/);
+	assert.equal(bound, 7);
+});
+
 test('form parsing validates IDs, repeated values, email and URL protocols', () => {
 	assert.equal(str(['  hello  ', 'ignored'], 3), 'hel');
 	assert.deepEqual(list([' A ', '', 5]), ['A', '', '']);
@@ -47,6 +74,16 @@ test('meeting timing and attachment signatures reject misleading files', async (
 	assert.equal(meetingFileType('../notes.txt', bytes('hello')), null);
 	assert.equal(meetingFileType('large.txt', new Uint8Array(FILE_LIMIT + 1).buffer), null);
 	assert.equal(meetingFileType('document.pdf', bytes('%PDF-1.7')), 'application/pdf');
+});
+
+test('oversized meeting uploads return a useful error for both upload forms', async () => {
+	const { meetingUploadLimit } = await load('src/routes/meeting-content.tsx');
+	for (const section of ['agenda', 'files']) {
+		const raw = new Request('http://localhost/', { method: 'POST', body: 'x', headers: { 'content-length': String(8 * 1024 * 1024 + 65537) } });
+		const context = { req: { raw, param: () => '3' }, redirect: (url: string) => url };
+		const result = await meetingUploadLimit(section)(context, () => { throw new Error('oversized request passed'); });
+		assert.equal(result, `/meetings/3?error=file#${section}`);
+	}
 });
 
 test('task and meeting permissions distinguish members, leads and execs', async () => {

@@ -58,12 +58,12 @@ export function Markdown({ text, empty }: { text: string; empty?: string }) {
 }
 
 /** A one-button form. `back` is where to land afterwards. */
-export function PostButton({ action, label, cls = 'btn', back, confirm, name, value }: { action: string; label: Child; cls?: string; back?: string; confirm?: string; name?: string; value?: string }) {
+export function PostButton({ action, label, cls = 'btn', back, confirm, name, value, removeLabel }: { action: string; label: Child; cls?: string; back?: string; confirm?: string; name?: string; value?: string; removeLabel?: string }) {
 	return (
 		<form method="post" action={action} class="inline" data-confirm={confirm}>
 			{back && <input type="hidden" name="back" value={back} />}
 			{name && <input type="hidden" name={name} value={value ?? ''} />}
-			<button class={cls}>{label}</button>
+			<button class={removeLabel ? 'icon-btn remove-cross' : cls} aria-label={removeLabel} title={removeLabel}>{removeLabel ? <span aria-hidden="true">×</span> : label}</button>
 		</form>
 	);
 }

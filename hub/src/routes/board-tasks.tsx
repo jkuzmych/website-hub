@@ -38,15 +38,16 @@ function insertAssignments(db: D1Database, task: string, team: number, people: n
 	];
 }
 
-export function TaskForm({ action, due, members, subteams, assignedPeople, assignedSubteams, task, returnToBoard }: {
+export function TaskForm({ action, due, members, subteams, assignedPeople, assignedSubteams, task, returnToBoard, returnPath }: {
 	action: string; due: string; members?: RosterMember[]; subteams?: Subteam[];
-	assignedPeople: Set<number>; assignedSubteams: Set<number>; task?: BoardTask; returnToBoard?: boolean;
+	assignedPeople: Set<number>; assignedSubteams: Set<number>; task?: BoardTask; returnToBoard?: boolean; returnPath?: string;
 }) {
 	return (
 		<form class="card stack" method="post" action={action} data-board-assignment={members ? 'required' : undefined}>
 			{task && <input type="hidden" name="version" value={task.version} />}
 			{!task && <input type="hidden" name="status" value="open" />}
 			{returnToBoard && <input type="hidden" name="return_to_board" value="1" />}
+			{returnPath && <input type="hidden" name="return_path" value={returnPath} />}
 			<Field label="Task"><input name="title" maxlength={200} required value={task?.title ?? ''} /></Field>
 			<Field label="Details"><textarea name="details" rows={4} maxlength={10000}>{task?.details ?? ''}</textarea></Field>
 			<Field label="Due date"><input type="date" name="due" required value={task?.due_date ?? due} /></Field>
@@ -110,7 +111,9 @@ boardTaskRoutes.post('/teams/:id/board', async (c) => {
 		...insertAssignments(db, task, team, people, subteams, ''),
 		boardLog(db, task, v.id, 'created')
 	]);
-	return c.redirect(str(form.return_to_board) === '1' ? `/teams/${team}?ok=created#board-task-${task}` : `${boardTaskHref(task)}?ok=created`);
+	const requestedReturn = safeRedirect(str(form.return_path));
+	const boardReturn = new RegExp(`^/teams/${team}/subteams/[1-9]\\d*$`).test(requestedReturn) ? requestedReturn : `/teams/${team}`;
+	return c.redirect(str(form.return_to_board) === '1' ? `${boardReturn}?ok=created#board-task-${task}` : `${boardTaskHref(task)}?ok=created`);
 });
 
 boardTaskRoutes.get('/board-tasks/:id', async (c) => {

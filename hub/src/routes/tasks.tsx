@@ -520,8 +520,8 @@ taskRoutes.get('/tasks/:id/edit', async (c) => {
 					</a>
 					<span class="spacer"></span>
 					{copies > 1 && (
-						<button class="btn danger" formaction={`/tasks/${task.id}/remove`} formnovalidate data-confirm={`Take ${task.assignee_name} off this task? Their copy and its history are deleted; everyone else keeps theirs.`}>
-							Remove {task.assignee_name}
+						<button class="icon-btn remove-cross" aria-label={`Remove ${task.assignee_name}`} title={`Remove ${task.assignee_name}`} formaction={`/tasks/${task.id}/remove`} formnovalidate data-confirm={`Take ${task.assignee_name} off this task? Their copy and its history are deleted; everyone else keeps theirs.`}>
+							<span aria-hidden="true">×</span>
 						</button>
 					)}
 					{task.status === 'open' && canCompleteTask(v, task) && (

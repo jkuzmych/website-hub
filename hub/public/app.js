@@ -1,5 +1,39 @@
 // Small browser interactions for the server-rendered pages.
 
+for (const filters of document.querySelectorAll('[data-library-filters]')) {
+	const section = filters.closest('.meeting-library');
+	const author = filters.querySelector('[data-library-author-filter]');
+	const type = filters.querySelector('[data-library-type-filter]');
+	const apply = () => {
+		let visible = 0;
+		for (const item of section.querySelectorAll('[data-library-item]')) {
+			item.hidden = !!((author.value && item.dataset.libraryAuthor !== author.value) || (type.value && item.dataset.libraryType !== type.value));
+			if (!item.hidden) visible++;
+		}
+		section.querySelector('[data-library-no-results]').hidden = visible > 0;
+	};
+	filters.addEventListener('change', apply);
+}
+
+for (const notice of document.querySelectorAll('[data-system-notice]')) {
+	const dismiss = () => { notice.hidden = true; };
+	notice.querySelector('[data-dismiss-notice]')?.addEventListener('click', dismiss);
+	setTimeout(dismiss, 5000);
+}
+if (document.querySelector('[data-system-notice]')) {
+	const url = new URL(location.href);
+	url.searchParams.delete('ok');
+	url.searchParams.delete('error');
+	history.replaceState(history.state, '', url);
+}
+
+for (const input of document.querySelectorAll('input[type="file"][name="file"]')) {
+	input.addEventListener('change', () => {
+		input.setCustomValidity([...input.files].reduce((total, file) => total + file.size, 0) > 8 * 1024 * 1024 ? 'Choose files totaling no more than 8 MiB.' : '');
+		if (input.validationMessage) input.reportValidity();
+	});
+}
+
 for (const form of document.querySelectorAll('[data-board-move]')) {
 	form.querySelector('select')?.addEventListener('change', () => form.requestSubmit());
 }
@@ -66,7 +100,7 @@ for (const form of document.querySelectorAll('[data-meeting-filters]')) {
 }
 
 for (const group of document.querySelectorAll('[data-meeting-tabs]')) {
-	const tabs = [...group.querySelectorAll('[role="tab"]')];
+	const tabs = [...group.querySelectorAll(':scope > [role="tablist"] > [role="tab"]')];
 	const select = (tab, updateUrl = false) => {
 		for (const option of tabs) {
 			const selected = option === tab;
@@ -101,6 +135,28 @@ for (const group of document.querySelectorAll('[data-meeting-tabs]')) {
 	};
 	revealAnchor();
 	window.addEventListener('hashchange', revealAnchor);
+}
+
+for (const group of document.querySelectorAll('[data-library-tabs]')) {
+	const tabs = [...group.querySelectorAll('[role="tab"]')];
+	const select = (tab) => {
+		for (const option of tabs) {
+			const selected = option === tab;
+			option.setAttribute('aria-selected', String(selected));
+			option.tabIndex = selected ? 0 : -1;
+			document.getElementById(option.getAttribute('aria-controls')).hidden = !selected;
+		}
+	};
+	for (const [index, tab] of tabs.entries()) {
+		tab.addEventListener('click', () => select(tab));
+		tab.addEventListener('keydown', (event) => {
+			const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : null;
+			if (next === null) return;
+			event.preventDefault();
+			select(tabs[next]);
+			tabs[next].focus();
+		});
+	}
 }
 
 for (const button of document.querySelectorAll('[data-members-dialog]')) {
@@ -166,10 +222,30 @@ for (const btn of document.querySelectorAll('[data-add-row]')) {
 	});
 }
 
-// Attendance: mark everyone present in one click (still needs Save).
+// Save only changed attendance entries, in order, so unrelated check-ins stay intact.
+for (const form of document.querySelectorAll('form[data-attendance-autosave]')) {
+	let pending = Promise.resolve();
+	const status = form.querySelector('[data-attendance-status]');
+	const save = (entries) => {
+		if (!status) { form.requestSubmit(); return; }
+		status.textContent = 'Saving…';
+		pending = pending.then(async () => {
+			const response = await fetch(form.action, { method: 'POST', body: new URLSearchParams(entries) });
+			if (!response.ok || !response.url.includes('ok=attendance')) throw new Error('Save failed');
+		}).then(() => { status.textContent = 'Saved'; }).catch(() => { status.textContent = 'Could not save attendance. Please try again.'; });
+	};
+	form.addEventListener('change', (event) => {
+		const input = event.target;
+		if (input.matches('input[type="radio"]:checked')) save([[input.name, input.value]]);
+	});
+	form.addEventListener('attendance-mark-all', () => save([...form.querySelectorAll('input[type="radio"][value="present"]:checked')].map((input) => [input.name, input.value])));
+}
+
+// Attendance: mark everyone present in one click.
 for (const btn of document.querySelectorAll('[data-all-present]')) {
 	btn.addEventListener('click', () => {
-		for (const radio of btn.closest('form').querySelectorAll('input[type=radio][value=present]')) radio.checked = true;
+		for (const radio of btn.form.querySelectorAll('input[type=radio][value=present]')) radio.checked = true;
+		btn.form.dispatchEvent(new Event('attendance-mark-all'));
 	});
 }
 
@@ -183,7 +259,7 @@ for (const history of document.querySelectorAll('.attendance-history')) {
 	}, { once: true });
 }
 
-// Menus (<details class="menu">): one open at a time; a click elsewhere or Escape closes them.
+// Dropdown menus close on outside clicks or Escape; inline disclosures stay open.
 const openMenus = () => document.querySelectorAll('details.menu[open]');
 document.addEventListener('click', (e) => {
 	for (const menu of openMenus()) if (!menu.contains(e.target)) menu.open = false;
