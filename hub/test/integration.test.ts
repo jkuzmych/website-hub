@@ -180,7 +180,7 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		const rerun = await request('/__test-reminders');
 		assert.equal((await rerun.json() as { sent: number }).sent, 0);
 		assert.match((await post(href + '/move', 5, { status: 'done', version: '2' })).headers.get('location')!, /ok=saved/);
-		assert.match(await html(href, 4), /<dt>Status<\/dt><dd>Done<\/dd>/);
+		assert.match(await html(href, 4), /<dt>Status<\/dt><dd>.*aria-label="Done"[^>]*><\/span><\/span><\/dd>/);
 		assert.match((await post(href + '/edit', 2, [['title', 'Edited card'], ['due', date], ['version', '3'], ['person', '3']])).headers.get('location')!, /ok=saved/);
 		assert.match((await post(href + '/edit', 2, [['title', 'Stale edit'], ['due', date], ['version', '3'], ['person', '5']])).headers.get('location')!, /error=stale/);
 		assert.equal((await db.prepare('SELECT member_id FROM board_task_recipients WHERE task_id = ?').bind(taskId).first())?.member_id, 3);
@@ -196,7 +196,7 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match(await html('/teams/10/subteams/2', 4), /Research only/);
 		assert.doesNotMatch(await html('/teams/10/subteams/1', 4), /Research only/);
 		const staged = await post('/teams/10/board', 1, { title: 'Started task', due, person: '2', status: 'in_progress' });
-		assert.match(await html(staged.headers.get('location')!, 1), /<dt>Status<\/dt><dd>In progress<\/dd>/);
+		assert.match(await html(staged.headers.get('location')!, 1), /<dt>Status<\/dt><dd>.*In progress<\/span><\/dd>/);
 		assert.match((await post('/teams/10/board', 1, { title: 'Invalid status', due, person: '2', status: 'invalid' })).headers.get('location')!, /error=selection/);
 		const fromBoard = await post('/teams/10/board', 1, { title: 'Back to board', due, person: '2', return_to_board: '1' });
 		const fromSubteam = await post('/teams/10/board', 1, { title: 'Subteam return', due, subteam: '1', return_to_board: '1', return_path: '/teams/10/subteams/1' });
@@ -207,6 +207,18 @@ test('Hub integration with the migrated Worker and D1', async (t) => {
 		assert.match(await html('/tasks/50', 4), /Old action item/);
 		assert.doesNotMatch(await html('/tasks/50', 4), /Restricted meeting/);
 		assert.equal((await post('/tasks/50/board-move', 2, { status: 'done' })).status, 404);
+		for (const [stage, stored, progress] of [['in_progress', 'open', 1], ['done', 'done', 0], ['dropped', 'dropped', 0], ['open', 'open', 0]] as const) {
+			assert.match((await post('/tasks/50/board-move', 1, { status: stage, back: '/tasks/50' })).headers.get('location')!, /ok=saved/);
+			const row = await db.prepare('SELECT status, board_in_progress FROM tasks WHERE id = 50').first<{ status: string; board_in_progress: number }>();
+			assert.equal(row?.status, stored);
+			assert.equal(row?.board_in_progress, progress);
+			if (stage === 'done') {
+				const ownerView = await html('/tasks/50', 1);
+				assert.match(ownerView, /class="done-stage-control"[\s\S]*?class="tick on done-mark"[\s\S]*?aria-label="Stage for Old action item \(Done\)"/);
+				assert.doesNotMatch(await html('/tasks/50', 4), /class="done-stage-control"/);
+			}
+			if (stage === 'dropped') assert.doesNotMatch(await html('/tasks/50', 1), /class="tick on done-mark"/);
+		}
 		assert.equal((await request('/meetings/2', 4)).status, 404);
 	});
 

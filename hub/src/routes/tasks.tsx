@@ -9,6 +9,7 @@ import { notifyAssigned } from '../reminders';
 import type { AppEnv, Member, Task, TaskRow, TaskStatus, Team, Viewer } from '../types';
 import { page } from '../views/layout';
 import { BoardTaskList } from '../views/board';
+import { DoneMark, individualStage, MoveCard } from '../views/task-stage';
 import { Due, Field, Markdown, MemberSelect, PageHead, PeoplePicker, PostButton, Tabs, TaskList, TeamSelect } from '../views/ui';
 import { loadMeeting } from './meeting-access';
 
@@ -322,8 +323,7 @@ taskRoutes.get('/tasks/:id', async (c) => {
 				title={task.title}
 				actions={
 					<>
-						{!overview && task.status === 'open' && canCompleteTask(v, task) && <PostButton action={`/tasks/${task.id}/status`} name="status" value="done" label="Mark done" cls="btn primary" back={back} />}
-						{!overview && task.status !== 'open' && canCompleteTask(v, task) && <PostButton action={`/tasks/${task.id}/status`} name="status" value="open" label="Reopen" back={back} />}
+						{!overview && task.status !== 'done' && canCompleteTask(v, task) && <MoveCard action={`/tasks/${task.id}/board-move`} status={individualStage(task)} title={task.title} back={back} />}
 						{canManageTask(v, task) && (
 							<a class="btn" href={`/tasks/${task.id}/edit`}>
 								Edit
@@ -337,7 +337,7 @@ taskRoutes.get('/tasks/:id', async (c) => {
 					<dl class="facts card">
 						<div>
 							<dt>{overview ? 'Progress' : 'Status'}</dt>
-							<dd>{overview ? `${done} of ${total} done` : <Due task={task} today={today} />}</dd>
+							<dd>{overview ? `${done} of ${total} done` : <span class="task-title-line">{task.status === 'done' ? (canCompleteTask(v, task) ? <MoveCard action={`/tasks/${task.id}/board-move`} status="done" title={task.title} back={back} /> : <DoneMark />) : BOARD_STATUSES.find(([status]) => status === individualStage(task))?.[1]}</span>}</dd>
 						</div>
 						<div>
 							<dt>Due</dt>

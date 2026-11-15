@@ -7,6 +7,7 @@ import { id, list, readForm, str, withNotice, type FormData } from '../form';
 import { isExec } from '../perm';
 import type { AppEnv, Team, Viewer } from '../types';
 import { MoveCard } from '../views/board';
+import { DoneMark } from '../views/task-stage';
 import { page } from '../views/layout';
 import { Empty, Field, Markdown, PageHead, PostButton } from '../views/ui';
 import { teamRoster, teamSubteams, type RosterMember, type Subteam } from './team-pages';
@@ -137,11 +138,11 @@ boardTaskRoutes.get('/board-tasks/:id', async (c) => {
 		<div class="grid-2 wide-left">
 			<section class="stack">
 				<dl class="facts card">
-					<div><dt>Status</dt><dd>{BOARD_STATUSES.find(([status]) => status === task.status)?.[1]}</dd></div>
+					<div><dt>Status</dt><dd><span class="task-title-line">{task.status === 'done' ? ((isExec(v) || !!task.is_mine) ? <MoveCard action={`${href}/move`} status="done" title={task.title} back={href} version={task.version} /> : <DoneMark />) : BOARD_STATUSES.find(([status]) => status === task.status)?.[1]}</span></dd></div>
 					<div><dt>Due</dt><dd>{formatDate(task.due_date, today)}</dd></div>
 					<div><dt>Assigned to</dt><dd>{[task.people, task.subteams].filter(Boolean).join(' · ') || 'Unassigned'}</dd></div>
 				</dl>
-				{(isExec(v) || !!task.is_mine) && <MoveCard action={`${href}/move`} status={task.status} title={task.title} back={href} version={task.version} />}
+				{task.status !== 'done' && (isExec(v) || !!task.is_mine) && <MoveCard action={`${href}/move`} status={task.status} title={task.title} back={href} version={task.version} />}
 				{!task.is_assigned && v.teamIds.has(task.team_id) && ['open', 'in_progress'].includes(task.status) &&
 					<PostButton action={`${href}/claim`} label="Assign to me" back={href} />}
 				<Markdown text={task.details} empty="No details." />
