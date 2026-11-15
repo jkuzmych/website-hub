@@ -442,6 +442,10 @@ tr.inactive, .team.inactive { opacity: 0.55; }
 .kanban-column > .section-title { margin: 0 0 8px; }
 .board-list { display: grid; gap: 8px; list-style: none; margin: 0 0 12px; padding: 0; }
 .board-card { display: grid; gap: 5px; min-width: 0; padding: 10px; overflow-wrap: anywhere; }
+.board-card[draggable='true'] { cursor: grab; }
+.board-card.is-dragging { opacity: .5; }
+.kanban-column.is-drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
+.board-move select { width: auto; max-width: 100%; min-width: 0; padding: 4px 26px 4px 8px; font-size: 12px; }
 .board-card .inline-tools select { flex: 1; }
 .selection-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 6px 12px; }
 .meeting-agenda { margin-bottom: 24px; }

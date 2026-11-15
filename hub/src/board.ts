@@ -19,6 +19,7 @@ export type BoardTask = {
 	version: number;
 	people: string;
 	subteams: string;
+	responsible_people: string | null;
 	is_assigned: number;
 	is_mine: number;
 };
@@ -28,6 +29,8 @@ const BOARD_SELECT = `SELECT b.*, t.name AS team_name,
 	  WHERE x.task_id = b.id AND m.active = 1) AS people,
 	 (SELECT group_concat(s.name, ', ') FROM board_task_subteams x JOIN subteams s ON s.id = x.subteam_id
 	  WHERE x.task_id = b.id AND s.archived = 0) AS subteams,
+	 (SELECT group_concat(name, ', ') FROM (SELECT DISTINCT m.id, m.name FROM board_task_recipients r
+	  JOIN members m ON m.id = r.member_id WHERE r.task_id = b.id AND m.active = 1 ORDER BY m.name COLLATE NOCASE)) AS responsible_people,
 	 EXISTS (SELECT 1 FROM board_task_people x JOIN members m ON m.id = x.member_id WHERE x.task_id = b.id AND m.active = 1)
 	  OR EXISTS (SELECT 1 FROM board_task_subteams x JOIN subteams s ON s.id = x.subteam_id WHERE x.task_id = b.id AND s.archived = 0) AS is_assigned,
 	 EXISTS (SELECT 1 FROM board_task_recipients r WHERE r.task_id = b.id AND r.member_id = ?1) AS is_mine
@@ -39,6 +42,7 @@ export function boardTask(db: D1Database, viewer: number, id: string) {
 
 export function boardTasks(db: D1Database, viewer: number, options: {
 	team?: number | null;
+	teamIds?: number[];
 	subteam?: number | null;
 	assignee?: number | null;
 	status?: string;
@@ -49,6 +53,7 @@ export function boardTasks(db: D1Database, viewer: number, options: {
 	const bind = (value: string | number) => `?${params.push(value)}`;
 	const where: string[] = [];
 	if (options.team) where.push(`b.team_id = ${bind(options.team)}`);
+	if (options.teamIds) where.push(`b.team_id IN (SELECT value FROM json_each(${bind(JSON.stringify(options.teamIds))}))`);
 	if (options.subteam) where.push(`EXISTS (SELECT 1 FROM board_task_subteams x WHERE x.task_id = b.id AND x.subteam_id = ${bind(options.subteam)})`);
 	if (options.assignee) where.push(`EXISTS (SELECT 1 FROM board_task_recipients r WHERE r.task_id = b.id AND r.member_id = ${bind(options.assignee)})`);
 	if (options.status === 'open' || options.status === 'overdue') where.push("b.status IN ('open', 'in_progress')");

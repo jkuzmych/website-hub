@@ -1,5 +1,45 @@
 // Small browser interactions for the server-rendered pages.
 
+for (const form of document.querySelectorAll('[data-board-move]')) {
+	form.querySelector('select')?.addEventListener('change', () => form.requestSubmit());
+}
+
+for (const board of document.querySelectorAll('.kanban')) {
+	let dragged = null;
+	board.addEventListener('dragstart', (event) => {
+		const card = event.target.closest('[data-board-draggable]');
+		if (!card || !board.contains(card)) return;
+		dragged = card;
+		card.classList.add('is-dragging');
+		event.dataTransfer.effectAllowed = 'move';
+		event.dataTransfer.setData('text/plain', 'task');
+	});
+	board.addEventListener('dragover', (event) => {
+		const column = event.target.closest('[data-board-stage]');
+		if (!dragged || !column || !board.contains(column)) return;
+		event.preventDefault();
+		event.dataTransfer.dropEffect = 'move';
+		for (const item of board.querySelectorAll('.is-drop-target')) item.classList.remove('is-drop-target');
+		column.classList.add('is-drop-target');
+	});
+	board.addEventListener('drop', (event) => {
+		const column = event.target.closest('[data-board-stage]');
+		if (!dragged || !column || !board.contains(column)) return;
+		event.preventDefault();
+		const form = dragged.querySelector('[data-board-move]');
+		const select = form?.querySelector('select[name="status"]');
+		if (select && select.value !== column.dataset.boardStage) {
+			select.value = column.dataset.boardStage;
+			form.requestSubmit();
+		}
+	});
+	board.addEventListener('dragend', () => {
+		dragged?.classList.remove('is-dragging');
+		dragged = null;
+		for (const item of board.querySelectorAll('.is-drop-target')) item.classList.remove('is-drop-target');
+	});
+}
+
 for (const form of document.querySelectorAll('[data-meeting-filters]')) {
 	let pending;
 	form.addEventListener('change', async () => {

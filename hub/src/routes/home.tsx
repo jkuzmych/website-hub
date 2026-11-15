@@ -91,9 +91,9 @@ homeRoutes.get('/', async (c) => {
 				title={`Hi, ${firstName}`}
 				sub={openCount ? `You have ${openCount} open task${openCount === 1 ? '' : 's'}${overdueCount ? `, ${overdueCount} overdue` : ''}.` : "You're all caught up."}
 				actions={
-					<a class="btn primary" href="/tasks/new">
+					<><a class="btn" href={'/tasks?status=open&team=mine'}>Pick a task</a><a class="btn primary" href="/tasks/new">
 						New task
-					</a>
+					</a></>
 				}
 			/>
 			{clubOverdue && clubOverdue.n > 0 && (
